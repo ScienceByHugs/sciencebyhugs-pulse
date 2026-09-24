@@ -17,7 +17,7 @@ type Log = {
 type Schedule = {
   id:string; tracked_item_id:string; frequency:'daily'|'weekly'|'interval'|'as_needed'|'custom';
   scheduled_time:string|null; days_of_week:number[]|null; interval_days:number|null; start_date:string;
-  active:boolean; tracked_items?: { name:string } | null
+  active:boolean; tracked_items?: { name:string; active?:boolean } | null
 }
 
 const esc=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
@@ -116,8 +116,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       .select('id,logged_at,amount,unit,status,injection_site,notes,schedule_id,scheduled_for,tracked_items(name,category)')
       .eq('user_id',userId).order('logged_at',{ascending:false}).limit(8),
     supabase.from('schedules')
-      .select('id,tracked_item_id,frequency,scheduled_time,days_of_week,interval_days,start_date,active,tracked_items(name)')
-      .eq('user_id',userId).eq('active',true).order('scheduled_time',{ascending:true}),
+      .select('id,tracked_item_id,frequency,scheduled_time,days_of_week,interval_days,start_date,active,tracked_items!inner(name,active)')
+      .eq('user_id',userId).eq('active',true).eq('tracked_items.active',true).order('scheduled_time',{ascending:true}),
     supabase.from('logs')
       .select('id,schedule_id,scheduled_for,status')
       .eq('user_id',userId).not('schedule_id','is',null)
@@ -160,7 +160,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       <section class="today-panel panel">
         <div class="panel-head">
           <div><span class="kicker">TODAY</span><h3>${today.toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}</h3></div>
-          <button class="ghost compact" id="add-schedule">+ Schedule</button>
+          <button class="ghost compact" id="add-schedule" ${itemList.length?'':'disabled'}>+ Schedule</button>
         </div>
         <div class="today-summary">
           <span><b>${completedToday}</b> complete</span>
@@ -222,6 +222,18 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
           </div>
         </article>
       </section>
+
+      ${!showArchived?`
+      <section class="panel schedules-panel">
+        <div class="panel-head"><div><span class="kicker">SCHEDULES</span><h3>Active schedules</h3></div><button class="ghost compact" id="add-schedule-secondary" ${itemList.length?'':'disabled'}>+ Add</button></div>
+        <div class="rows">
+          ${scheduleList.length?scheduleList.map(s=>`
+            <div class="row schedule-row">
+              <span><b>${esc(s.tracked_items?.name??'Tracked item')}</b><small>${esc(scheduleLabel(s))}${s.scheduled_time?' · '+esc(new Date('1970-01-01T'+s.scheduled_time).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})):''}</small></span>
+              <button class="ghost compact" data-schedule-edit="${s.id}">Edit</button>
+            </div>`).join(''):'<p class="empty">No active schedules yet.</p>'}
+        </div>
+      </section>`:''}
 
       <dialog id="item-modal">
         <form id="item-form">
@@ -343,7 +355,13 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
   document.querySelector('#add-item')!.addEventListener('click',()=>openItem())
   document.querySelector('#quick-log')?.addEventListener('click',()=>{ if(itemList[0]) openLog(itemList[0]) })
   document.querySelector('#add-schedule')?.addEventListener('click',()=>openSchedule())
+  document.querySelector('#add-schedule-secondary')?.addEventListener('click',()=>openSchedule())
   document.querySelector('#schedule-frequency')!.addEventListener('change',updateScheduleFields)
+  document.querySelectorAll<HTMLButtonElement>('[data-schedule-edit]').forEach(btn=>btn.addEventListener('click',()=>{
+    const schedule=scheduleList.find(s=>s.id===btn.dataset.scheduleEdit)
+    const item=itemList.find(i=>i.id===schedule?.tracked_item_id)
+    if(schedule && item) openSchedule(item,schedule)
+  }))
 
   document.querySelector('#log-item')!.addEventListener('change',e=>{
     const id=(e.target as HTMLSelectElement).value
@@ -438,6 +456,10 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       const active=action==='restore'
       const {error}=await supabase.from('tracked_items').update({active,updated_at:new Date().toISOString()}).eq('id',item.id).eq('user_id',userId)
       if(error) return alert(error.message)
+      if(!active){
+        const {error:scheduleDisableError}=await supabase.from('schedules').update({active:false,updated_at:new Date().toISOString()}).eq('tracked_item_id',item.id).eq('user_id',userId)
+        if(scheduleDisableError) return alert(scheduleDisableError.message)
+      }
       renderDashboard(userId,email,showArchived)
     }
   }))
