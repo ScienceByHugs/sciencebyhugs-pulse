@@ -230,7 +230,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       : await supabase.from('tracked_items').insert({user_id:userId,...payload})
     if(result.error) return alert(result.error.message)
     itemModal.close()
-    renderDashboard(userId,email,showArchived)
+    renderDashboard(userId,email,id ? showArchived : false)
   })
 
   document.querySelector('#log-form')!.addEventListener('submit',async e=>{
