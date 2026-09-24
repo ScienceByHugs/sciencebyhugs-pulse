@@ -98,7 +98,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       <section class="welcome"><span class="kicker">TRACKER</span><h2>Good to see you.</h2><p class="muted">${esc(email)}</p></section>
 
       <section class="quick-actions">
-        <button class="primary" id="quick-log" ${itemList.length?'':'disabled'}>+ Quick log</button>
+        <button class="primary" id="quick-log" ${itemList.length && !showArchived?'':'disabled'}>+ Quick log</button>
         <button class="ghost" id="add-item">+ New tracked item</button>
         <button class="ghost" id="toggle-archive">${showArchived?'View active':'View archived'}</button>
       </section>
@@ -176,7 +176,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
 
   const itemModal=document.querySelector<HTMLDialogElement>('#item-modal')!
   const logModal=document.querySelector<HTMLDialogElement>('#log-modal')!
-  document.querySelectorAll<HTMLButtonElement>('.modal-close').forEach(btn=>btn.addEventListener('click',()=>btn.closest('dialog')?.close()))
+  document.querySelectorAll<HTMLButtonElement>('.modal-close').forEach(btn=>btn.addEventListener('click',()=>{ const dialog=btn.closest('dialog') as HTMLDialogElement|null; dialog?.close() }))
 
   const openItem=(item?:Item)=>{
     document.querySelector<HTMLHeadingElement>('#item-title')!.textContent=item?'Edit tracked item':'Add tracked item'
@@ -247,9 +247,9 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       ? (document.querySelector<HTMLSelectElement>('#log-site')?.value||null) : null
     const route=document.querySelector<HTMLInputElement>('#log-route')?.value.trim()||null
     const noteText=document.querySelector<HTMLTextAreaElement>('#log-notes')!.value.trim()
-    const notes=[route?'Route: '+route:'',noteText].filter(Boolean).join(' · ')||null
+    const notes=noteText||null
     const {error}=await supabase.from('logs').insert({
-      user_id:userId,tracked_item_id,amount,unit,status,
+      user_id:userId,tracked_item_id,amount,unit,status,route,
       logged_at:new Date(when).toISOString(),injection_site,notes
     })
     if(error) return alert(error.message)
