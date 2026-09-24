@@ -1,30 +1,27 @@
-# Science By HUGs Pulse
+# Science By HUGs — PULSE
 
 **Track. Measure. Evolve.**
 
-Biometric-inspired tracking PWA for schedules, routines, and personal logs.
+PULSE is the private personal tracking PWA in the Science By HUGs product family.
 
-## Status
+## v0.2 foundation
 
-Initial PWA foundation for the Science By HUGs product family.
+- Dedicated Supabase backend
+- Email/password authentication
+- Row Level Security on all personal tables
+- Tracked items for injections, medications, supplements, and other routines
+- One-tap logging from the dashboard
+- Recent activity history
+- Installable Vite PWA
 
-## Stack
-
-- Vite
-- TypeScript
-- vite-plugin-pwa
-- Static frontend deployment
-- Separate backend planned for tracker data
+Backend project: `Science By HUGs PULSE` (Supabase, US West).
 
 ## Development
 
 ```bash
 npm install
 npm run dev
-```
-
-Build for production:
-
-```bash
 npm run build
 ```
+
+The browser uses a Supabase publishable key only. Never add a service-role or secret key to this repository.
