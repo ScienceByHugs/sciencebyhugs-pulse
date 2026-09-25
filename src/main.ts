@@ -23,6 +23,8 @@ type Schedule = {
 type Inventory = {
   id:string; tracked_item_id:string; quantity:number; unit:string; low_threshold:number|null;
   lot_number:string|null; expiration_date:string|null; auto_decrement:boolean; decrement_amount:number|null;
+  strength_amount:number|null; strength_unit:string|null; strength_per_amount:number|null; strength_per_unit:string|null;
+  containers_on_hand:number|null;
   tracked_items?: { name:string; active?:boolean; category?:string; route?:string|null; default_amount?:number|null; default_unit?:string|null; form?:Form|null } | null
 }
 
@@ -171,7 +173,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       .eq('user_id',userId).not('schedule_id','is',null)
       .gte('scheduled_for',startOfDay(today).toISOString()).lt('scheduled_for',endOfDay(today).toISOString()),
     supabase.from('inventory')
-      .select('id,tracked_item_id,quantity,unit,low_threshold,lot_number,expiration_date,auto_decrement,decrement_amount,tracked_items(name,active,category,route,default_amount,default_unit,form)')
+      .select('id,tracked_item_id,quantity,unit,low_threshold,lot_number,expiration_date,auto_decrement,decrement_amount,strength_amount,strength_unit,strength_per_amount,strength_per_unit,containers_on_hand,tracked_items(name,active,category,route,default_amount,default_unit,form)')
       .eq('user_id',userId).order('updated_at',{ascending:false})
   ])
   if(itemError || allItemError || logError || scheduleError || todayLogError || inventoryError) {
@@ -458,7 +460,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
               return `<article class="inventory-card ${low||expired?'inventory-warning':''}">
                 <div>
                   <div class="inventory-card-title"><b>${esc(row.tracked_items?.name??'Tracked item')}</b>${low?'<span>LOW</span>':''}${expired?'<span>EXPIRED</span>':''}</div>
-                  <strong>${esc(row.quantity)} ${esc(row.unit)} total</strong>
+                  <strong>${esc(row.quantity)} ${esc(row.unit)} total${row.containers_on_hand!==null?' · '+esc(row.containers_on_hand)+' on hand':''}</strong>
+                  ${row.strength_amount!==null && row.strength_unit && row.strength_per_amount!==null && row.strength_per_unit?`<div class="inventory-strength">${esc(row.strength_amount)} ${esc(row.strength_unit)} per ${esc(row.strength_per_amount)} ${esc(row.strength_per_unit)}</div>`:''}
                   <div class="inventory-details">
                     <span>${esc(row.tracked_items?.category==='anabolic'?'Anabolic Steroid':titleCase(row.tracked_items?.category??'other'))}</span>
                     ${row.tracked_items?.route?`<span>${esc(titleCase(row.tracked_items.route))}</span>`:''}
@@ -483,6 +486,9 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           <input id="inventory-id" type="hidden">
           <label>Tracked item<select id="inventory-item" required></select></label>
           <div class="split"><label>Total amount on hand<input id="inventory-quantity" type="number" min="0" step="any" required></label><label>Inventory unit<select id="inventory-unit" required><option value="">Select unit</option><option value="mg">mg</option><option value="mL">mL</option><option value="tablet">Tablet</option><option value="tbsp">TBSP</option><option value="tsp">TSP</option><option value="vial">Vial</option></select></label></div>
+          <label>Containers / units on hand<input id="inventory-containers" type="number" min="0" step="any" placeholder="e.g. 3 vials"></label>
+          <div class="split"><label>Strength amount<input id="inventory-strength-amount" type="number" min="0" step="any" placeholder="e.g. 250"></label><label>Strength unit<select id="inventory-strength-unit"><option value="">Select unit</option><option value="mg">mg</option><option value="mcg">mcg</option><option value="g">g</option><option value="mL">mL</option><option value="tablet">Tablet</option></select></label></div>
+          <div class="split"><label>Per amount<input id="inventory-strength-per-amount" type="number" min="0" step="any" placeholder="e.g. 1"></label><label>Per unit<select id="inventory-strength-per-unit"><option value="">Select unit</option><option value="mL">mL</option><option value="tablet">Tablet</option><option value="tbsp">TBSP</option><option value="tsp">TSP</option><option value="vial">Vial</option></select></label></div>
           <div class="split"><label>Low stock threshold<input id="inventory-threshold" type="number" min="0" step="any"></label><label>Expiration date<input id="inventory-expiration" type="date"></label></div>
           <label>Lot number<input id="inventory-lot" maxlength="120" placeholder="Optional"></label>
           <label class="toggle-row"><input id="inventory-auto" type="checkbox"><span>Auto-decrement on completed logs</span></label>
@@ -671,6 +677,11 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     document.querySelector<HTMLInputElement>('#inventory-quantity')!.value=String(row?.quantity??0)
     document.querySelector<HTMLSelectElement>('#inventory-unit')!.value=row?.unit??''
     document.querySelector<HTMLInputElement>('#inventory-threshold')!.value=row?.low_threshold?.toString()??''
+    document.querySelector<HTMLInputElement>('#inventory-containers')!.value=row?.containers_on_hand?.toString()??''
+    document.querySelector<HTMLInputElement>('#inventory-strength-amount')!.value=row?.strength_amount?.toString()??''
+    document.querySelector<HTMLSelectElement>('#inventory-strength-unit')!.value=row?.strength_unit??''
+    document.querySelector<HTMLInputElement>('#inventory-strength-per-amount')!.value=row?.strength_per_amount?.toString()??''
+    document.querySelector<HTMLSelectElement>('#inventory-strength-per-unit')!.value=row?.strength_per_unit??''
     document.querySelector<HTMLInputElement>('#inventory-lot')!.value=row?.lot_number??''
     document.querySelector<HTMLInputElement>('#inventory-expiration')!.value=row?.expiration_date??''
     document.querySelector<HTMLInputElement>('#inventory-auto')!.checked=row?.auto_decrement??false
@@ -698,12 +709,20 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     const unit=document.querySelector<HTMLSelectElement>('#inventory-unit')!.value
     const thresholdRaw=document.querySelector<HTMLInputElement>('#inventory-threshold')!.value
     const low_threshold=thresholdRaw===''?null:Number(thresholdRaw)
+    const containersRaw=document.querySelector<HTMLInputElement>('#inventory-containers')!.value
+    const containers_on_hand=containersRaw===''?null:Number(containersRaw)
+    const strengthAmountRaw=document.querySelector<HTMLInputElement>('#inventory-strength-amount')!.value
+    const strength_amount=strengthAmountRaw===''?null:Number(strengthAmountRaw)
+    const strength_unit=document.querySelector<HTMLSelectElement>('#inventory-strength-unit')!.value||null
+    const strengthPerAmountRaw=document.querySelector<HTMLInputElement>('#inventory-strength-per-amount')!.value
+    const strength_per_amount=strengthPerAmountRaw===''?null:Number(strengthPerAmountRaw)
+    const strength_per_unit=document.querySelector<HTMLSelectElement>('#inventory-strength-per-unit')!.value||null
     const lot_number=document.querySelector<HTMLInputElement>('#inventory-lot')!.value.trim()||null
     const expiration_date=document.querySelector<HTMLInputElement>('#inventory-expiration')!.value||null
     const auto_decrement=document.querySelector<HTMLInputElement>('#inventory-auto')!.checked
     const decrementRaw=document.querySelector<HTMLInputElement>('#inventory-decrement')!.value
     const decrement_amount=auto_decrement?Number(decrementRaw||0):null
-    const payload={quantity,unit,low_threshold,lot_number,expiration_date,auto_decrement,decrement_amount,updated_at:new Date().toISOString()}
+    const payload={quantity,unit,low_threshold,lot_number,expiration_date,auto_decrement,decrement_amount,containers_on_hand,strength_amount,strength_unit,strength_per_amount,strength_per_unit,updated_at:new Date().toISOString()}
     const result=id
       ? await supabase.from('inventory').update(payload).eq('id',id).eq('user_id',userId)
       : await supabase.from('inventory').insert({user_id:userId,tracked_item_id,...payload})
