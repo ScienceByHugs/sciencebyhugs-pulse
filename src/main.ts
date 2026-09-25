@@ -11,9 +11,9 @@ type Item = {
   route:string|null; notes:string|null; active:boolean
 }
 type Log = {
-  id:string; logged_at:string; amount:number|null; unit:string|null; status:string;
-  injection_site:string|null; notes:string|null; schedule_id:string|null; scheduled_for:string|null;
-  tracked_items?: { name:string; category:string } | null
+  id:string; tracked_item_id:string; logged_at:string; amount:number|null; unit:string|null; status:string;
+  route:string|null; injection_site:string|null; notes:string|null; schedule_id:string|null; scheduled_for:string|null;
+  tracked_items?: { name:string; category:string; form?:Form|null } | null
 }
 type Schedule = {
   id:string; tracked_item_id:string; frequency:'daily'|'weekly'|'interval'|'as_needed'|'custom';
@@ -120,12 +120,15 @@ function categoryFields(item:Item){
 
 async function renderDashboard(userId:string,email:string,showArchived=false) {
   const today=new Date()
-  const [{data:items,error:itemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError}] = await Promise.all([
+  const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError}] = await Promise.all([
     supabase.from('tracked_items')
       .select('id,name,category,form,default_amount,default_unit,route,notes,active')
       .eq('user_id',userId).eq('active',!showArchived).order('created_at',{ascending:false}),
+    supabase.from('tracked_items')
+      .select('id,name,category,form,default_amount,default_unit,route,notes,active')
+      .eq('user_id',userId).order('name',{ascending:true}),
     supabase.from('logs')
-      .select('id,logged_at,amount,unit,status,injection_site,notes,schedule_id,scheduled_for,tracked_items(name,category)')
+      .select('id,tracked_item_id,logged_at,amount,unit,status,route,injection_site,notes,schedule_id,scheduled_for,tracked_items(name,category,form)')
       .eq('user_id',userId).order('logged_at',{ascending:false}).limit(8),
     supabase.from('schedules')
       .select('id,tracked_item_id,frequency,scheduled_time,days_of_week,interval_days,start_date,active,tracked_items!inner(name,active)')
@@ -135,13 +138,14 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       .eq('user_id',userId).not('schedule_id','is',null)
       .gte('scheduled_for',startOfDay(today).toISOString()).lt('scheduled_for',endOfDay(today).toISOString())
   ])
-  if(itemError || logError || scheduleError || todayLogError) {
-    const problem=itemError?.message??logError?.message??scheduleError?.message??todayLogError?.message
+  if(itemError || allItemError || logError || scheduleError || todayLogError) {
+    const problem=itemError?.message??allItemError?.message??logError?.message??scheduleError?.message??todayLogError?.message
     app!.innerHTML=`<main class="app-shell"><div class="notice">Unable to load PULSE: ${esc(problem)}</div></main>`
     return
   }
 
   const itemList=(items??[]) as Item[]
+  const allItemList=(allItems??[]) as Item[]
   const recent=(logs??[]) as unknown as Log[]
   const scheduleList=(schedules??[]) as unknown as Schedule[]
   const todayDone=new Map((todayLogs??[]).map((l:any)=>[l.schedule_id,l.status]))
@@ -222,7 +226,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
         </article>
 
         <article class="panel">
-          <div class="panel-head"><div><span class="kicker">HISTORY</span><h3>Recent activity</h3></div></div>
+          <div class="panel-head"><div><span class="kicker">HISTORY</span><h3>Recent activity</h3></div><button class="ghost compact" id="open-history">View all</button></div>
           <div class="rows">
             ${recent.length?recent.map(l=>`
               <div class="row log-row">
@@ -307,15 +311,46 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       <dialog id="log-modal">
         <form id="log-form">
           <div class="panel-head"><div><span class="kicker" id="log-kicker">QUICK LOG</span><h3 id="log-title">Log item</h3></div><button class="ghost compact modal-close" type="button">Close</button></div>
-          <input id="log-schedule-id" type="hidden"><input id="log-scheduled-for" type="hidden">
+          <input id="log-id" type="hidden"><input id="log-schedule-id" type="hidden"><input id="log-scheduled-for" type="hidden">
           <label>Tracked item<select id="log-item" required></select></label>
           <div class="split"><label>Amount<input id="log-amount" type="number" min="0" step="any"></label><label>Unit<input id="log-unit" placeholder="mg, mL, tablet"></label></div>
           <div id="category-fields"></div>
           <label>Date & time<input id="log-time" type="datetime-local" required></label>
           <label>Status<select id="log-status"><option value="completed">Completed</option><option value="skipped">Skipped</option></select></label>
           <label>Notes<textarea id="log-notes" rows="3" placeholder="Optional notes"></textarea></label>
-          <button class="primary" type="submit">Save log</button>
+          <div class="log-form-actions">
+            <button class="primary" type="submit">Save log</button>
+            <button class="ghost danger" id="delete-log" type="button" hidden>Delete log</button>
+          </div>
         </form>
+      </dialog>
+
+      <dialog id="history-modal" class="history-modal">
+        <section class="history-shell">
+          <div class="panel-head history-head">
+            <div><span class="kicker">HISTORY</span><h3>Full timeline</h3><p class="muted">Search, filter, edit, or remove logged activity.</p></div>
+            <button class="ghost compact modal-close" type="button">Close</button>
+          </div>
+          <div class="history-filters">
+            <label class="history-search">Search<input id="history-search" type="search" placeholder="Item, notes, route, site..."></label>
+            <label>Item<select id="history-item"><option value="">All items</option></select></label>
+            <label>Category<select id="history-category">
+              <option value="">All categories</option>
+              <option value="anabolic">Anabolic</option><option value="hormone">Hormone</option>
+              <option value="peptide">Peptide</option><option value="glp">GLP</option>
+              <option value="medication">Medication</option><option value="vitamin">Vitamin</option>
+              <option value="supplement">Supplement</option><option value="injection">Legacy: Injection</option>
+              <option value="other">Legacy: Other</option>
+            </select></label>
+            <label>Status<select id="history-status"><option value="">All statuses</option><option value="completed">Completed</option><option value="skipped">Skipped</option></select></label>
+            <label>Injection site<select id="history-site"><option value="">All sites</option></select></label>
+            <label>From<input id="history-from" type="date"></label>
+            <label>To<input id="history-to" type="date"></label>
+            <button class="ghost compact history-clear" id="history-clear" type="button">Clear filters</button>
+          </div>
+          <div class="history-summary" id="history-summary"></div>
+          <div class="history-list" id="history-list"><p class="empty">Loading history…</p></div>
+        </section>
       </dialog>
     </main>`
 
@@ -325,6 +360,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
   const itemModal=document.querySelector<HTMLDialogElement>('#item-modal')!
   const scheduleModal=document.querySelector<HTMLDialogElement>('#schedule-modal')!
   const logModal=document.querySelector<HTMLDialogElement>('#log-modal')!
+  const historyModal=document.querySelector<HTMLDialogElement>('#history-modal')!
+  let historyLogs:Log[]=[]
   document.querySelectorAll<HTMLButtonElement>('.modal-close').forEach(btn=>btn.addEventListener('click',()=>{ const dialog=btn.closest('dialog') as HTMLDialogElement|null; dialog?.close() }))
 
   const openItem=(item?:Item)=>{
@@ -365,24 +402,116 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
     scheduleModal.showModal()
   }
 
-  const fillLog=(item:Item,schedule?:Schedule)=>{
+  const fillLog=(item:Item,schedule?:Schedule,existing?:Log)=>{
     const select=document.querySelector<HTMLSelectElement>('#log-item')!
-    select.innerHTML=itemList.map(i=>`<option value="${i.id}">${esc(i.name)}</option>`).join('')
+    const available=existing?allItemList:itemList
+    select.innerHTML=available.map(i=>`<option value="${i.id}">${esc(i.name)}</option>`).join('')
     select.value=item.id
-    document.querySelector<HTMLHeadingElement>('#log-title')!.textContent=`Log ${item.name}`
-    document.querySelector<HTMLElement>('#log-kicker')!.textContent=titleCase(item.category)
-    document.querySelector<HTMLInputElement>('#log-amount')!.value=item.default_amount?.toString()??''
-    document.querySelector<HTMLInputElement>('#log-unit')!.value=item.default_unit??''
-    document.querySelector<HTMLInputElement>('#log-time')!.value=localInputValue()
-    document.querySelector<HTMLSelectElement>('#log-status')!.value='completed'
-    document.querySelector<HTMLTextAreaElement>('#log-notes')!.value=''
-    document.querySelector<HTMLInputElement>('#log-schedule-id')!.value=schedule?.id??''
-    document.querySelector<HTMLInputElement>('#log-scheduled-for')!.value=schedule?occurrenceDate(schedule,today).toISOString():''
-    if(schedule) document.querySelector<HTMLInputElement>('#log-time')!.value=localInputValue(occurrenceDate(schedule,today))
+    select.disabled=!!existing
+    document.querySelector<HTMLInputElement>('#log-id')!.value=existing?.id??''
+    document.querySelector<HTMLHeadingElement>('#log-title')!.textContent=existing?`Edit ${item.name}`:`Log ${item.name}`
+    document.querySelector<HTMLElement>('#log-kicker')!.textContent=existing?'EDIT LOG':titleCase(item.category)
+    document.querySelector<HTMLInputElement>('#log-amount')!.value=(existing?.amount??item.default_amount)?.toString()??''
+    document.querySelector<HTMLInputElement>('#log-unit')!.value=existing?.unit??item.default_unit??''
+    document.querySelector<HTMLInputElement>('#log-time')!.value=existing?localInputValue(new Date(existing.logged_at)):localInputValue()
+    document.querySelector<HTMLSelectElement>('#log-status')!.value=existing?.status??'completed'
+    document.querySelector<HTMLTextAreaElement>('#log-notes')!.value=existing?.notes??''
+    document.querySelector<HTMLInputElement>('#log-schedule-id')!.value=existing?.schedule_id??schedule?.id??''
+    document.querySelector<HTMLInputElement>('#log-scheduled-for')!.value=existing?.scheduled_for??(schedule?occurrenceDate(schedule,today).toISOString():'')
+    if(schedule && !existing) document.querySelector<HTMLInputElement>('#log-time')!.value=localInputValue(occurrenceDate(schedule,today))
     document.querySelector<HTMLElement>('#category-fields')!.innerHTML=categoryFields(item)
+    const route=document.querySelector<HTMLSelectElement>('#log-route')
+    if(route && existing?.route) route.value=existing.route
+    const site=document.querySelector<HTMLSelectElement>('#log-site')
+    if(site && existing?.injection_site) site.value=existing.injection_site
+    document.querySelector<HTMLButtonElement>('#delete-log')!.hidden=!existing
   }
 
-  const openLog=(item:Item,schedule?:Schedule)=>{ fillLog(item,schedule); logModal.showModal() }
+  const openLog=(item:Item,schedule?:Schedule,existing?:Log)=>{ fillLog(item,schedule,existing); logModal.showModal() }
+
+  const historyFilterValues=()=>({
+    search:document.querySelector<HTMLInputElement>('#history-search')!.value.trim().toLowerCase(),
+    item:document.querySelector<HTMLSelectElement>('#history-item')!.value,
+    category:document.querySelector<HTMLSelectElement>('#history-category')!.value,
+    status:document.querySelector<HTMLSelectElement>('#history-status')!.value,
+    site:document.querySelector<HTMLSelectElement>('#history-site')!.value,
+    from:document.querySelector<HTMLInputElement>('#history-from')!.value,
+    to:document.querySelector<HTMLInputElement>('#history-to')!.value
+  })
+
+  const renderHistoryRows=()=>{
+    const f=historyFilterValues()
+    const filtered=historyLogs.filter(log=>{
+      const item=log.tracked_items
+      const haystack=[item?.name,log.notes,log.route,log.injection_site,log.unit].filter(Boolean).join(' ').toLowerCase()
+      if(f.search && !haystack.includes(f.search)) return false
+      if(f.item && log.tracked_item_id!==f.item) return false
+      if(f.category && item?.category!==f.category) return false
+      if(f.status && log.status!==f.status) return false
+      if(f.site && log.injection_site!==f.site) return false
+      const d=dateKey(new Date(log.logged_at))
+      if(f.from && d<f.from) return false
+      if(f.to && d>f.to) return false
+      return true
+    })
+    document.querySelector<HTMLElement>('#history-summary')!.textContent=`${filtered.length} of ${historyLogs.length} logs`
+    document.querySelector<HTMLElement>('#history-list')!.innerHTML=filtered.length?filtered.map(log=>`
+      <article class="history-entry">
+        <div class="history-entry-main">
+          <div class="history-entry-title">
+            <b>${esc(log.tracked_items?.name??'Tracked item')}</b>
+            <span class="status-pill ${esc(log.status)}">${esc(titleCase(log.status))}</span>
+          </div>
+          <small>${new Date(log.logged_at).toLocaleString()} · ${esc(titleCase(log.tracked_items?.category??'other'))}${log.schedule_id?' · Scheduled':' · Manual'}</small>
+          <div class="history-meta">
+            ${log.amount!==null?`<span>${esc(log.amount)} ${esc(log.unit??'')}</span>`:''}
+            ${log.route?`<span>${esc(titleCase(log.route))}</span>`:''}
+            ${log.injection_site?`<span>${esc(log.injection_site)}</span>`:''}
+          </div>
+          ${log.notes?`<p>${esc(log.notes)}</p>`:''}
+        </div>
+        <button class="ghost compact" data-history-edit="${log.id}">Edit</button>
+      </article>`).join(''):'<p class="empty">No logs match these filters.</p>'
+    document.querySelectorAll<HTMLButtonElement>('[data-history-edit]').forEach(btn=>btn.addEventListener('click',()=>{
+      const log=historyLogs.find(l=>l.id===btn.dataset.historyEdit)
+      const item=allItemList.find(i=>i.id===log?.tracked_item_id)
+      if(log && item) openLog(item,undefined,log)
+    }))
+  }
+
+  const refreshHistory=async()=>{
+    document.querySelector<HTMLElement>('#history-list')!.innerHTML='<p class="empty">Loading history…</p>'
+    const {data,error}=await supabase.from('logs')
+      .select('id,tracked_item_id,logged_at,amount,unit,status,route,injection_site,notes,schedule_id,scheduled_for,tracked_items(name,category,form)')
+      .eq('user_id',userId).order('logged_at',{ascending:false}).limit(1000)
+    if(error){
+      document.querySelector<HTMLElement>('#history-list')!.innerHTML=`<div class="notice">${esc(error.message)}</div>`
+      return
+    }
+    historyLogs=(data??[]) as unknown as Log[]
+    const sites=[...new Set(historyLogs.map(l=>l.injection_site).filter((v):v is string=>!!v))].sort()
+    const siteSelect=document.querySelector<HTMLSelectElement>('#history-site')!
+    const selected=siteSelect.value
+    siteSelect.innerHTML='<option value="">All sites</option>'+sites.map(s=>`<option>${esc(s)}</option>`).join('')
+    siteSelect.value=selected
+    renderHistoryRows()
+  }
+
+  const openHistory=async()=>{
+    document.querySelector<HTMLSelectElement>('#history-item')!.innerHTML='<option value="">All items</option>'+allItemList.map(i=>`<option value="${i.id}">${esc(i.name)}</option>`).join('')
+    historyModal.showModal()
+    await refreshHistory()
+  }
+
+  document.querySelector('#open-history')!.addEventListener('click',openHistory)
+  document.querySelectorAll<HTMLInputElement|HTMLSelectElement>('#history-search,#history-item,#history-category,#history-status,#history-site,#history-from,#history-to').forEach(el=>el.addEventListener(el.id==='history-search'?'input':'change',renderHistoryRows))
+  document.querySelector('#history-clear')!.addEventListener('click',()=>{
+    ;['history-search','history-item','history-category','history-status','history-site','history-from','history-to'].forEach(id=>{
+      const el=document.querySelector<HTMLInputElement|HTMLSelectElement>('#'+id)!
+      el.value=''
+    })
+    renderHistoryRows()
+  })
 
   document.querySelector('#add-item')!.addEventListener('click',()=>openItem())
   document.querySelector('#quick-log')?.addEventListener('click',()=>{ if(itemList[0]) openLog(itemList[0]) })
@@ -455,8 +584,9 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
 
   document.querySelector('#log-form')!.addEventListener('submit',async e=>{
     e.preventDefault()
+    const logId=document.querySelector<HTMLInputElement>('#log-id')!.value
     const tracked_item_id=document.querySelector<HTMLSelectElement>('#log-item')!.value
-    const item=itemList.find(i=>i.id===tracked_item_id)
+    const item=(logId?allItemList:itemList).find(i=>i.id===tracked_item_id)
     if(!item) return
     const amountRaw=document.querySelector<HTMLInputElement>('#log-amount')!.value
     const amount=amountRaw?Number(amountRaw):null
@@ -466,16 +596,26 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
     const injection_site=item.form==='injectable' || item.category==='injection'
       ? (document.querySelector<HTMLSelectElement>('#log-site')?.value||null) : null
     const route=document.querySelector<HTMLSelectElement>('#log-route')?.value||null
-    const noteText=document.querySelector<HTMLTextAreaElement>('#log-notes')!.value.trim()
-    const notes=noteText||null
+    const notes=document.querySelector<HTMLTextAreaElement>('#log-notes')!.value.trim()||null
     const schedule_id=document.querySelector<HTMLInputElement>('#log-schedule-id')!.value||null
     const scheduled_for=document.querySelector<HTMLInputElement>('#log-scheduled-for')!.value||null
-    const {error}=await supabase.from('logs').insert({
-      user_id:userId,tracked_item_id,amount,unit,status,route,schedule_id,scheduled_for,
-      logged_at:new Date(when).toISOString(),injection_site,notes
-    })
+    const payload={amount,unit,status,route,schedule_id,scheduled_for,logged_at:new Date(when).toISOString(),injection_site,notes}
+    const result=logId
+      ? await supabase.from('logs').update(payload).eq('id',logId).eq('user_id',userId)
+      : await supabase.from('logs').insert({user_id:userId,tracked_item_id,...payload})
+    if(result.error) return alert(result.error.message)
+    logModal.close()
+    if(logId && historyModal.open) return refreshHistory()
+    renderDashboard(userId,email,showArchived)
+  })
+
+  document.querySelector('#delete-log')!.addEventListener('click',async()=>{
+    const logId=document.querySelector<HTMLInputElement>('#log-id')!.value
+    if(!logId || !confirm('Delete this log? This cannot be undone.')) return
+    const {error}=await supabase.from('logs').delete().eq('id',logId).eq('user_id',userId)
     if(error) return alert(error.message)
     logModal.close()
+    if(historyModal.open) return refreshHistory()
     renderDashboard(userId,email,showArchived)
   })
 
