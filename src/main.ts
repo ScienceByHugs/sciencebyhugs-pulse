@@ -123,7 +123,7 @@ function categoryFields(item:Item){
       </select></label>` : ''}`
 }
 
-async function renderDashboard(userId:string,email:string,showArchived=false) {
+async function renderDashboard(userId:string,email:string,showArchived=false,jwtRetry=0) {
   const today=new Date()
   const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError},{data:inventory,error:inventoryError}] = await Promise.all([
     supabase.from('tracked_items')
@@ -148,6 +148,10 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
   ])
   if(itemError || allItemError || logError || scheduleError || todayLogError || inventoryError) {
     const problem=itemError?.message??allItemError?.message??logError?.message??scheduleError?.message??todayLogError?.message??inventoryError?.message
+    if(jwtRetry<1 && problem?.toLowerCase().includes('jwt issued at future')){
+      await new Promise(resolve=>setTimeout(resolve,1500))
+      return renderDashboard(userId,email,showArchived,jwtRetry+1)
+    }
     app!.innerHTML=`<main class="app-shell"><div class="notice">Unable to load PULSE: ${esc(problem)}</div></main>`
     return
   }
