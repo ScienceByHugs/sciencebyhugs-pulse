@@ -20,6 +20,11 @@ type Schedule = {
   scheduled_time:string|null; days_of_week:number[]|null; interval_days:number|null; start_date:string;
   active:boolean; tracked_items?: { name:string; active?:boolean } | null
 }
+type Inventory = {
+  id:string; tracked_item_id:string; quantity:number; unit:string; low_threshold:number|null;
+  lot_number:string|null; expiration_date:string|null; auto_decrement:boolean; decrement_amount:number|null;
+  tracked_items?: { name:string; active?:boolean } | null
+}
 
 const esc=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
 const titleCase=(v:string)=>v.charAt(0).toUpperCase()+v.slice(1)
@@ -120,7 +125,7 @@ function categoryFields(item:Item){
 
 async function renderDashboard(userId:string,email:string,showArchived=false) {
   const today=new Date()
-  const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError}] = await Promise.all([
+  const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError},{data:inventory,error:inventoryError}] = await Promise.all([
     supabase.from('tracked_items')
       .select('id,name,category,form,default_amount,default_unit,route,notes,active')
       .eq('user_id',userId).eq('active',!showArchived).order('created_at',{ascending:false}),
@@ -136,10 +141,13 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
     supabase.from('logs')
       .select('id,schedule_id,scheduled_for,status')
       .eq('user_id',userId).not('schedule_id','is',null)
-      .gte('scheduled_for',startOfDay(today).toISOString()).lt('scheduled_for',endOfDay(today).toISOString())
+      .gte('scheduled_for',startOfDay(today).toISOString()).lt('scheduled_for',endOfDay(today).toISOString()),
+    supabase.from('inventory')
+      .select('id,tracked_item_id,quantity,unit,low_threshold,lot_number,expiration_date,auto_decrement,decrement_amount,tracked_items(name,active)')
+      .eq('user_id',userId).order('updated_at',{ascending:false})
   ])
-  if(itemError || allItemError || logError || scheduleError || todayLogError) {
-    const problem=itemError?.message??allItemError?.message??logError?.message??scheduleError?.message??todayLogError?.message
+  if(itemError || allItemError || logError || scheduleError || todayLogError || inventoryError) {
+    const problem=itemError?.message??allItemError?.message??logError?.message??scheduleError?.message??todayLogError?.message??inventoryError?.message
     app!.innerHTML=`<main class="app-shell"><div class="notice">Unable to load PULSE: ${esc(problem)}</div></main>`
     return
   }
@@ -148,6 +156,12 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
   const allItemList=(allItems??[]) as Item[]
   const recent=(logs??[]) as unknown as Log[]
   const scheduleList=(schedules??[]) as unknown as Schedule[]
+  const inventoryList=(inventory??[]) as unknown as Inventory[]
+  const inventoryByItem=new Map(inventoryList.map(row=>[row.tracked_item_id,row]))
+  const todayKey=dateKey(today)
+  const lowInventory=inventoryList.filter(row=>row.low_threshold!==null && Number(row.quantity)<=Number(row.low_threshold))
+  const expiredInventory=inventoryList.filter(row=>!!row.expiration_date && row.expiration_date<todayKey)
+  const inventoryAlerts=[...new Map([...lowInventory,...expiredInventory].map(row=>[row.id,row])).values()]
   const todayDone=new Map((todayLogs??[]).map((l:any)=>[l.schedule_id,l.status]))
   const dueToday=scheduleList.filter(s=>scheduleDueOn(s,today)).map(s=>{
     const when=occurrenceDate(s,today)
@@ -169,6 +183,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       <section class="quick-actions">
         <button class="primary" id="quick-log" ${itemList.length && !showArchived?'':'disabled'}>+ Quick log</button>
         <button class="ghost" id="add-item">+ New tracked item</button>
+        <button class="ghost" id="open-inventory">Inventory${inventoryAlerts.length?` · ${inventoryAlerts.length}`:''}</button>
         <button class="ghost" id="toggle-archive">${showArchived?'View active':'View archived'}</button>
       </section>
 
@@ -203,7 +218,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       <section class="stats">
         <article><span>${showArchived?'ARCHIVED':'ACTIVE'} ITEMS</span><strong>${itemList.length}</strong></article>
         <article><span>ACTIVE SCHEDULES</span><strong>${scheduleList.length}</strong></article>
-        <article><span>STATUS</span><strong class="online">● Ready</strong></article>
+        <article><span>INVENTORY ALERTS</span><strong class="${inventoryAlerts.length?'inventory-alert-count':'online'}">${inventoryAlerts.length||'● Clear'}</strong></article>
       </section>
 
       <section class="layout">
@@ -249,6 +264,24 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
               <button class="ghost compact" data-schedule-edit="${s.id}">Edit</button>
             </div>`).join(''):'<p class="empty">No active schedules yet.</p>'}
         </div>
+      </section>`:''}
+
+      ${!showArchived?`
+      <section class="panel inventory-preview">
+        <div class="panel-head">
+          <div><span class="kicker">INVENTORY</span><h3>Stock overview</h3></div>
+          <button class="ghost compact" id="open-inventory-secondary">Manage inventory</button>
+        </div>
+        ${inventoryAlerts.length?`<div class="inventory-alerts">
+          ${inventoryAlerts.slice(0,4).map(row=>{
+            const low=row.low_threshold!==null && Number(row.quantity)<=Number(row.low_threshold)
+            const expired=!!row.expiration_date && row.expiration_date<todayKey
+            return `<div class="inventory-alert-row">
+              <span><b>${esc(row.tracked_items?.name??'Tracked item')}</b><small>${low?'Low stock':''}${low&&expired?' · ':''}${expired?'Expired':''}</small></span>
+              <strong>${esc(row.quantity)} ${esc(row.unit)}</strong>
+            </div>`
+          }).join('')}
+        </div>`:`<p class="empty">No low-stock or expiration alerts.</p>`}
       </section>`:''}
 
       <dialog id="item-modal">
@@ -352,6 +385,50 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
           <div class="history-list" id="history-list"><p class="empty">Loading history…</p></div>
         </section>
       </dialog>
+
+      <dialog id="inventory-modal" class="inventory-modal">
+        <section class="inventory-shell">
+          <div class="panel-head inventory-head">
+            <div><span class="kicker">INVENTORY</span><h3>Manage stock</h3><p class="muted">Track quantity, lot, expiration, and automatic deductions.</p></div>
+            <button class="ghost compact modal-close" type="button">Close</button>
+          </div>
+          <div class="inventory-toolbar">
+            <button class="primary compact" id="inventory-add" type="button">+ Add inventory</button>
+            <span class="muted">${inventoryAlerts.length} active alert${inventoryAlerts.length===1?'':'s'}</span>
+          </div>
+          <div class="inventory-list" id="inventory-list">
+            ${inventoryList.length?inventoryList.map(row=>{
+              const low=row.low_threshold!==null && Number(row.quantity)<=Number(row.low_threshold)
+              const expired=!!row.expiration_date && row.expiration_date<todayKey
+              return `<article class="inventory-card ${low||expired?'inventory-warning':''}">
+                <div>
+                  <div class="inventory-card-title"><b>${esc(row.tracked_items?.name??'Tracked item')}</b>${low?'<span>LOW</span>':''}${expired?'<span>EXPIRED</span>':''}</div>
+                  <strong>${esc(row.quantity)} ${esc(row.unit)}</strong>
+                  <small>${row.lot_number?'Lot '+esc(row.lot_number)+' · ':''}${row.expiration_date?'Expires '+esc(row.expiration_date):'No expiration'}${row.auto_decrement?' · Auto −'+esc(row.decrement_amount??0)+' / completed log':''}</small>
+                </div>
+                <button class="ghost compact" data-inventory-edit="${row.id}">Edit</button>
+              </article>`
+            }).join(''):`<p class="empty">No inventory records yet.</p>`}
+          </div>
+        </section>
+      </dialog>
+
+      <dialog id="inventory-edit-modal">
+        <form id="inventory-form">
+          <div class="panel-head"><div><span class="kicker">INVENTORY</span><h3 id="inventory-title">Add inventory</h3></div><button class="ghost compact modal-close" type="button">Close</button></div>
+          <input id="inventory-id" type="hidden">
+          <label>Tracked item<select id="inventory-item" required></select></label>
+          <div class="split"><label>Quantity<input id="inventory-quantity" type="number" min="0" step="any" required></label><label>Unit<input id="inventory-unit" required placeholder="vials, tablets, mL"></label></div>
+          <div class="split"><label>Low stock threshold<input id="inventory-threshold" type="number" min="0" step="any"></label><label>Expiration date<input id="inventory-expiration" type="date"></label></div>
+          <label>Lot number<input id="inventory-lot" maxlength="120" placeholder="Optional"></label>
+          <label class="toggle-row"><input id="inventory-auto" type="checkbox"><span>Auto-decrement on completed logs</span></label>
+          <label id="inventory-decrement-wrap">Deduct per completed log<input id="inventory-decrement" type="number" min="0" step="any" value="1"></label>
+          <div class="inventory-form-actions">
+            <button class="primary" type="submit">Save inventory</button>
+            <button class="ghost danger" id="inventory-delete" type="button" hidden>Delete inventory</button>
+          </div>
+        </form>
+      </dialog>
     </main>`
 
   document.querySelector('#signout')!.addEventListener('click',async()=>{await supabase.auth.signOut();renderAuth()})
@@ -361,6 +438,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
   const scheduleModal=document.querySelector<HTMLDialogElement>('#schedule-modal')!
   const logModal=document.querySelector<HTMLDialogElement>('#log-modal')!
   const historyModal=document.querySelector<HTMLDialogElement>('#history-modal')!
+  const inventoryModal=document.querySelector<HTMLDialogElement>('#inventory-modal')!
+  const inventoryEditModal=document.querySelector<HTMLDialogElement>('#inventory-edit-modal')!
   let historyLogs:Log[]=[]
   document.querySelectorAll<HTMLButtonElement>('.modal-close').forEach(btn=>btn.addEventListener('click',()=>{ const dialog=btn.closest('dialog') as HTMLDialogElement|null; dialog?.close() }))
 
@@ -513,7 +592,74 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
     renderHistoryRows()
   })
 
-  document.querySelector('#add-item')!.addEventListener('click',()=>openItem())
+  const updateInventoryDecrementVisibility=()=>{
+    const enabled=document.querySelector<HTMLInputElement>('#inventory-auto')!.checked
+    document.querySelector<HTMLElement>('#inventory-decrement-wrap')!.hidden=!enabled
+  }
+
+  const openInventoryEditor=(row?:Inventory)=>{
+    const select=document.querySelector<HTMLSelectElement>('#inventory-item')!
+    select.innerHTML=allItemList.map(i=>`<option value="${i.id}">${esc(i.name)}${i.active?'':' (archived)'}</option>`).join('')
+    select.value=row?.tracked_item_id??allItemList[0]?.id??''
+    select.disabled=!!row
+    document.querySelector<HTMLInputElement>('#inventory-id')!.value=row?.id??''
+    document.querySelector<HTMLHeadingElement>('#inventory-title')!.textContent=row?'Edit inventory':'Add inventory'
+    document.querySelector<HTMLInputElement>('#inventory-quantity')!.value=String(row?.quantity??0)
+    document.querySelector<HTMLInputElement>('#inventory-unit')!.value=row?.unit??''
+    document.querySelector<HTMLInputElement>('#inventory-threshold')!.value=row?.low_threshold?.toString()??''
+    document.querySelector<HTMLInputElement>('#inventory-lot')!.value=row?.lot_number??''
+    document.querySelector<HTMLInputElement>('#inventory-expiration')!.value=row?.expiration_date??''
+    document.querySelector<HTMLInputElement>('#inventory-auto')!.checked=row?.auto_decrement??false
+    document.querySelector<HTMLInputElement>('#inventory-decrement')!.value=String(row?.decrement_amount??1)
+    document.querySelector<HTMLButtonElement>('#inventory-delete')!.hidden=!row
+    updateInventoryDecrementVisibility()
+    inventoryEditModal.showModal()
+  }
+
+  const openInventory=()=>inventoryModal.showModal()
+  document.querySelector('#open-inventory')!.addEventListener('click',openInventory)
+  document.querySelector('#open-inventory-secondary')?.addEventListener('click',openInventory)
+  document.querySelector('#inventory-add')!.addEventListener('click',()=>openInventoryEditor())
+  document.querySelector('#inventory-auto')!.addEventListener('change',updateInventoryDecrementVisibility)
+  document.querySelectorAll<HTMLButtonElement>('[data-inventory-edit]').forEach(btn=>btn.addEventListener('click',()=>{
+    const row=inventoryList.find(i=>i.id===btn.dataset.inventoryEdit)
+    if(row) openInventoryEditor(row)
+  }))
+
+  document.querySelector('#inventory-form')!.addEventListener('submit',async e=>{
+    e.preventDefault()
+    const id=document.querySelector<HTMLInputElement>('#inventory-id')!.value
+    const tracked_item_id=document.querySelector<HTMLSelectElement>('#inventory-item')!.value
+    const quantity=Number(document.querySelector<HTMLInputElement>('#inventory-quantity')!.value||0)
+    const unit=document.querySelector<HTMLInputElement>('#inventory-unit')!.value.trim()
+    const thresholdRaw=document.querySelector<HTMLInputElement>('#inventory-threshold')!.value
+    const low_threshold=thresholdRaw===''?null:Number(thresholdRaw)
+    const lot_number=document.querySelector<HTMLInputElement>('#inventory-lot')!.value.trim()||null
+    const expiration_date=document.querySelector<HTMLInputElement>('#inventory-expiration')!.value||null
+    const auto_decrement=document.querySelector<HTMLInputElement>('#inventory-auto')!.checked
+    const decrementRaw=document.querySelector<HTMLInputElement>('#inventory-decrement')!.value
+    const decrement_amount=auto_decrement?Number(decrementRaw||0):null
+    const payload={quantity,unit,low_threshold,lot_number,expiration_date,auto_decrement,decrement_amount,updated_at:new Date().toISOString()}
+    const result=id
+      ? await supabase.from('inventory').update(payload).eq('id',id).eq('user_id',userId)
+      : await supabase.from('inventory').insert({user_id:userId,tracked_item_id,...payload})
+    if(result.error) return alert(result.error.message)
+    inventoryEditModal.close()
+    inventoryModal.close()
+    renderDashboard(userId,email,showArchived)
+  })
+
+  document.querySelector('#inventory-delete')!.addEventListener('click',async()=>{
+    const id=document.querySelector<HTMLInputElement>('#inventory-id')!.value
+    if(!id || !confirm('Delete this inventory record?')) return
+    const {error}=await supabase.from('inventory').delete().eq('id',id).eq('user_id',userId)
+    if(error) return alert(error.message)
+    inventoryEditModal.close()
+    inventoryModal.close()
+    renderDashboard(userId,email,showArchived)
+  })
+
+    document.querySelector('#add-item')!.addEventListener('click',()=>openItem())
   document.querySelector('#quick-log')?.addEventListener('click',()=>{ if(itemList[0]) openLog(itemList[0]) })
   document.querySelector('#add-schedule')?.addEventListener('click',()=>openSchedule())
   document.querySelector('#add-schedule-secondary')?.addEventListener('click',()=>openSchedule())
