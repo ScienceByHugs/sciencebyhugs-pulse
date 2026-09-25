@@ -120,33 +120,33 @@ function categoryFields(item:Item){
     ${item.form==='injectable' || item.category==='injection' ? `
       <label>Injection site<select id="log-site">
         <option value="">Select injection site</option>
-        <optgroup label="Stomach">
-          <option value="Stomach — Lower right">Lower right</option>
-          <option value="Stomach — Lower left">Lower left</option>
-          <option value="Stomach — Upper right">Upper right</option>
-          <option value="Stomach — Upper left">Upper left</option>
-          <option value="Stomach — Left love handle">Left love handle</option>
-          <option value="Stomach — Right love handle">Right love handle</option>
+        <optgroup label="Abdomen">
+          <option value="Abdomen — Right Lower Quadrant (RLQ)">Lower right</option>
+          <option value="Abdomen — Left Lower Quadrant (LLQ)">Lower left</option>
+          <option value="Abdomen — Right Upper Quadrant (RUQ)">Upper right</option>
+          <option value="Abdomen — Left Upper Quadrant (LUQ)">Upper left</option>
+          <option value="Abdomen — Left Lateral Flank">Left love handle</option>
+          <option value="Abdomen — Right Lateral Flank">Right love handle</option>
         </optgroup>
-        <optgroup label="Deltoid">
-          <option value="Deltoid — Right">Right</option>
-          <option value="Deltoid — Left">Left</option>
+        <optgroup label="Deltoid Muscle">
+          <option value="Deltoid Muscle — Right">Right</option>
+          <option value="Deltoid Muscle — Left">Left</option>
         </optgroup>
-        <optgroup label="Quadricep">
-          <option value="Quadricep — Right">Right</option>
-          <option value="Quadricep — Left">Left</option>
+        <optgroup label="Vastus Lateralis">
+          <option value="Vastus Lateralis — Right">Right</option>
+          <option value="Vastus Lateralis — Left">Left</option>
         </optgroup>
-        <optgroup label="Lats">
-          <option value="Lats — Right">Right</option>
-          <option value="Lats — Left">Left</option>
+        <optgroup label="Latissimus Dorsi">
+          <option value="Latissimus Dorsi — Right">Right</option>
+          <option value="Latissimus Dorsi — Left">Left</option>
         </optgroup>
-        <optgroup label="Traps">
-          <option value="Traps — Right">Right</option>
-          <option value="Traps — Left">Left</option>
+        <optgroup label="Trapezius Muscle">
+          <option value="Trapezius Muscle — Right">Right</option>
+          <option value="Trapezius Muscle — Left">Left</option>
         </optgroup>
-        <optgroup label="Glute">
-          <option value="Glute — Right">Right</option>
-          <option value="Glute — Left">Left</option>
+        <optgroup label="Gluteal Region">
+          <option value="Gluteal Region — Right">Right</option>
+          <option value="Gluteal Region — Left">Left</option>
         </optgroup>
       </select></label>` : ''}`
 }
