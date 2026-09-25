@@ -4,9 +4,10 @@ import { supabase } from './supabase'
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('App root not found')
 
-type Category = 'injection'|'medication'|'supplement'|'other'
+type Category = 'anabolic'|'hormone'|'peptide'|'glp'|'medication'|'vitamin'|'supplement'|'injection'|'other'
+type Form = 'injectable'|'oral'|'suppository'|'topical'
 type Item = {
-  id:string; name:string; category:Category; default_amount:number|null; default_unit:string|null;
+  id:string; name:string; category:Category; form:Form|null; default_amount:number|null; default_unit:string|null;
   route:string|null; notes:string|null; active:boolean
 }
 type Log = {
@@ -97,25 +98,31 @@ function renderAuth(message='') {
   })
 }
 
+function routeOptions(selected:string|null=''){
+  const options=[
+    ['intramuscular','Intramuscular'],
+    ['subcutaneous','Subcutaneous'],
+    ['powder','Powder'],
+    ['oral','Oral']
+  ]
+  return '<option value="">Select route</option>'+options.map(([value,label])=>`<option value="${value}" ${selected===value?'selected':''}>${label}</option>`).join('')
+}
+
 function categoryFields(item:Item){
-  if(item.category==='injection'){
-    return `
-      <label>Route<input id="log-route" value="${esc(item.route??'')}" placeholder="e.g. Subcutaneous"></label>
+  return `
+    <label>Route<select id="log-route">${routeOptions(item.route)}</select></label>
+    ${item.form==='injectable' || item.category==='injection' ? `
       <label>Injection site<select id="log-site">
         <option value="">Select site</option><option>Abdomen</option><option>Left thigh</option><option>Right thigh</option>
         <option>Left arm</option><option>Right arm</option><option>Other</option>
-      </select></label>`
-  }
-  if(item.category==='medication') return `<label>Route<input id="log-route" value="${esc(item.route??'')}" placeholder="e.g. Oral"></label>`
-  if(item.category==='supplement') return `<label>Form / route<input id="log-route" value="${esc(item.route??'')}" placeholder="e.g. Capsule"></label>`
-  return `<label>Method / route<input id="log-route" value="${esc(item.route??'')}" placeholder="Optional"></label>`
+      </select></label>` : ''}`
 }
 
 async function renderDashboard(userId:string,email:string,showArchived=false) {
   const today=new Date()
   const [{data:items,error:itemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError}] = await Promise.all([
     supabase.from('tracked_items')
-      .select('id,name,category,default_amount,default_unit,route,notes,active')
+      .select('id,name,category,form,default_amount,default_unit,route,notes,active')
       .eq('user_id',userId).eq('active',!showArchived).order('created_at',{ascending:false}),
     supabase.from('logs')
       .select('id,logged_at,amount,unit,status,injection_site,notes,schedule_id,scheduled_for,tracked_items(name,category)')
@@ -202,7 +209,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
             ${itemList.length?itemList.map(i=>`
               <div class="row item-card" data-id="${i.id}">
                 <button class="item-main" data-action="log" data-id="${i.id}" ${showArchived?'disabled':''}>
-                  <span><b>${esc(i.name)}</b><small>${esc(titleCase(i.category))}${i.route?' · '+esc(i.route):''}</small></span>
+                  <span><b>${esc(i.name)}</b><small>${esc(titleCase(i.category))}${i.form?' · '+esc(titleCase(i.form)):''}${i.route?' · '+esc(titleCase(i.route)):''}</small></span>
                   <span class="dose">${i.default_amount??'—'} ${esc(i.default_unit??'')}</span>
                 </button>
                 <div class="row-actions">
@@ -246,11 +253,30 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
           <input id="item-id" type="hidden">
           <label>Name<input id="item-name" required maxlength="120" placeholder="e.g. Vitamin D"></label>
           <label>Category<select id="item-category">
-            <option value="injection">Injection</option><option value="medication">Medication</option>
-            <option value="supplement">Supplement</option><option value="other">Other</option>
+            <option value="anabolic">Anabolic</option>
+            <option value="hormone">Hormone</option>
+            <option value="peptide">Peptide</option>
+            <option value="glp">GLP</option>
+            <option value="medication">Medication</option>
+            <option value="vitamin">Vitamin</option>
+            <option value="supplement">Supplement</option>
+            <option value="injection" disabled>Legacy: Injection</option>
+            <option value="other" disabled>Legacy: Other</option>
+          </select></label>
+          <label>Form<select id="item-form-type">
+            <option value="injectable">Injectable</option>
+            <option value="oral">Oral</option>
+            <option value="suppository">Suppository</option>
+            <option value="topical">Topical</option>
           </select></label>
           <div class="split"><label>Default amount<input id="item-amount" type="number" min="0" step="any"></label><label>Unit<input id="item-unit" placeholder="mg, mL, tablet"></label></div>
-          <label>Default route / form<input id="item-route" placeholder="e.g. Subcutaneous, oral, capsule"></label>
+          <label>Route<select id="item-route">
+            <option value="">Select route</option>
+            <option value="intramuscular">Intramuscular</option>
+            <option value="subcutaneous">Subcutaneous</option>
+            <option value="powder">Powder</option>
+            <option value="oral">Oral</option>
+          </select></label>
           <label>Notes<textarea id="item-notes" rows="3" placeholder="Optional private notes"></textarea></label>
           <button class="primary" type="submit">Save item</button>
         </form>
@@ -305,10 +331,11 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
     document.querySelector<HTMLHeadingElement>('#item-title')!.textContent=item?'Edit tracked item':'Add tracked item'
     document.querySelector<HTMLInputElement>('#item-id')!.value=item?.id??''
     document.querySelector<HTMLInputElement>('#item-name')!.value=item?.name??''
-    document.querySelector<HTMLSelectElement>('#item-category')!.value=item?.category??'injection'
+    document.querySelector<HTMLSelectElement>('#item-category')!.value=item?.category??'peptide'
+    document.querySelector<HTMLSelectElement>('#item-form-type')!.value=item?.form??'injectable'
     document.querySelector<HTMLInputElement>('#item-amount')!.value=item?.default_amount?.toString()??''
     document.querySelector<HTMLInputElement>('#item-unit')!.value=item?.default_unit??''
-    document.querySelector<HTMLInputElement>('#item-route')!.value=item?.route??''
+    document.querySelector<HTMLSelectElement>('#item-route')!.value=item?.route??''
     document.querySelector<HTMLTextAreaElement>('#item-notes')!.value=item?.notes??''
     itemModal.showModal()
   }
@@ -412,11 +439,12 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
     const id=document.querySelector<HTMLInputElement>('#item-id')!.value
     const name=document.querySelector<HTMLInputElement>('#item-name')!.value.trim()
     const category=document.querySelector<HTMLSelectElement>('#item-category')!.value as Category
+    const form=document.querySelector<HTMLSelectElement>('#item-form-type')!.value as Form
     const amountRaw=document.querySelector<HTMLInputElement>('#item-amount')!.value
     const default_unit=document.querySelector<HTMLInputElement>('#item-unit')!.value.trim()||null
-    const route=document.querySelector<HTMLInputElement>('#item-route')!.value.trim()||null
+    const route=document.querySelector<HTMLSelectElement>('#item-route')!.value||null
     const notes=document.querySelector<HTMLTextAreaElement>('#item-notes')!.value.trim()||null
-    const payload={name,category,default_amount:amountRaw?Number(amountRaw):null,default_unit,route,notes,updated_at:new Date().toISOString()}
+    const payload={name,category,form,default_amount:amountRaw?Number(amountRaw):null,default_unit,route,notes,updated_at:new Date().toISOString()}
     const result=id
       ? await supabase.from('tracked_items').update(payload).eq('id',id).eq('user_id',userId)
       : await supabase.from('tracked_items').insert({user_id:userId,...payload})
@@ -435,9 +463,9 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
     const unit=document.querySelector<HTMLInputElement>('#log-unit')!.value.trim()||null
     const status=document.querySelector<HTMLSelectElement>('#log-status')!.value
     const when=document.querySelector<HTMLInputElement>('#log-time')!.value
-    const injection_site=item.category==='injection'
+    const injection_site=item.form==='injectable' || item.category==='injection'
       ? (document.querySelector<HTMLSelectElement>('#log-site')?.value||null) : null
-    const route=document.querySelector<HTMLInputElement>('#log-route')?.value.trim()||null
+    const route=document.querySelector<HTMLSelectElement>('#log-route')?.value||null
     const noteText=document.querySelector<HTMLTextAreaElement>('#log-notes')!.value.trim()
     const notes=noteText||null
     const schedule_id=document.querySelector<HTMLInputElement>('#log-schedule-id')!.value||null
