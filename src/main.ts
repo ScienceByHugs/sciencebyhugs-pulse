@@ -23,7 +23,7 @@ type Schedule = {
 type Inventory = {
   id:string; tracked_item_id:string; quantity:number; unit:string; low_threshold:number|null;
   lot_number:string|null; expiration_date:string|null; auto_decrement:boolean; decrement_amount:number|null;
-  tracked_items?: { name:string; active?:boolean } | null
+  tracked_items?: { name:string; active?:boolean; category?:string; route?:string|null; default_amount?:number|null; default_unit?:string|null; form?:Form|null } | null
 }
 
 const esc=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
@@ -108,7 +108,8 @@ function routeOptions(selected:string|null=''){
     ['intramuscular','Intramuscular'],
     ['subcutaneous','Subcutaneous'],
     ['powder','Powder'],
-    ['oral','Oral']
+    ['oral','Oral'],
+    ['topical','Topical']
   ]
   return '<option value="">Select route</option>'+options.map(([value,label])=>`<option value="${value}" ${selected===value?'selected':''}>${label}</option>`).join('')
 }
@@ -118,8 +119,35 @@ function categoryFields(item:Item){
     <label>Route<select id="log-route">${routeOptions(item.route)}</select></label>
     ${item.form==='injectable' || item.category==='injection' ? `
       <label>Injection site<select id="log-site">
-        <option value="">Select site</option><option>Abdomen</option><option>Left thigh</option><option>Right thigh</option>
-        <option>Left arm</option><option>Right arm</option><option>Other</option>
+        <option value="">Select injection site</option>
+        <optgroup label="Stomach">
+          <option value="Stomach — Lower right">Lower right</option>
+          <option value="Stomach — Lower left">Lower left</option>
+          <option value="Stomach — Upper right">Upper right</option>
+          <option value="Stomach — Upper left">Upper left</option>
+          <option value="Stomach — Left love handle">Left love handle</option>
+          <option value="Stomach — Right love handle">Right love handle</option>
+        </optgroup>
+        <optgroup label="Deltoid">
+          <option value="Deltoid — Right">Right</option>
+          <option value="Deltoid — Left">Left</option>
+        </optgroup>
+        <optgroup label="Quadricep">
+          <option value="Quadricep — Right">Right</option>
+          <option value="Quadricep — Left">Left</option>
+        </optgroup>
+        <optgroup label="Lats">
+          <option value="Lats — Right">Right</option>
+          <option value="Lats — Left">Left</option>
+        </optgroup>
+        <optgroup label="Traps">
+          <option value="Traps — Right">Right</option>
+          <option value="Traps — Left">Left</option>
+        </optgroup>
+        <optgroup label="Glute">
+          <option value="Glute — Right">Right</option>
+          <option value="Glute — Left">Left</option>
+        </optgroup>
       </select></label>` : ''}`
 }
 
@@ -143,7 +171,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       .eq('user_id',userId).not('schedule_id','is',null)
       .gte('scheduled_for',startOfDay(today).toISOString()).lt('scheduled_for',endOfDay(today).toISOString()),
     supabase.from('inventory')
-      .select('id,tracked_item_id,quantity,unit,low_threshold,lot_number,expiration_date,auto_decrement,decrement_amount,tracked_items(name,active)')
+      .select('id,tracked_item_id,quantity,unit,low_threshold,lot_number,expiration_date,auto_decrement,decrement_amount,tracked_items(name,active,category,route,default_amount,default_unit,form)')
       .eq('user_id',userId).order('updated_at',{ascending:false})
   ])
   if(itemError || allItemError || logError || scheduleError || todayLogError || inventoryError) {
@@ -166,6 +194,28 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const lowInventory=inventoryList.filter(row=>row.low_threshold!==null && Number(row.quantity)<=Number(row.low_threshold))
   const expiredInventory=inventoryList.filter(row=>!!row.expiration_date && row.expiration_date<todayKey)
   const inventoryAlerts=[...new Map([...lowInventory,...expiredInventory].map(row=>[row.id,row])).values()]
+  const weeklyPlanFor=(itemId:string)=>{
+    const item=allItemList.find(i=>i.id===itemId)
+    if(!item?.default_amount || !item.default_unit) return null
+    const itemSchedules=scheduleList.filter(s=>s.tracked_item_id===itemId && s.active)
+    let weeklyOccurrences=0
+    let exact=true
+    for(const s of itemSchedules){
+      if(s.frequency==='daily') weeklyOccurrences+=7
+      else if(s.frequency==='weekly') weeklyOccurrences+=(s.days_of_week?.length||1)
+      else if(s.frequency==='interval' && s.interval_days){
+        weeklyOccurrences+=7/s.interval_days
+        exact=false
+      } else if(s.frequency!=='as_needed') exact=false
+    }
+    if(!weeklyOccurrences) return null
+    return {
+      occurrences:weeklyOccurrences,
+      total:Number(item.default_amount)*weeklyOccurrences,
+      unit:item.default_unit,
+      exact
+    }
+  }
   const todayDone=new Map((todayLogs??[]).map((l:any)=>[l.schedule_id,l.status]))
   const dueToday=scheduleList.filter(s=>scheduleDueOn(s,today)).map(s=>{
     const when=occurrenceDate(s,today)
@@ -294,7 +344,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           <input id="item-id" type="hidden">
           <label>Name<input id="item-name" required maxlength="120" placeholder="e.g. Vitamin D"></label>
           <label>Category<select id="item-category">
-            <option value="anabolic">Anabolic</option>
+            <option value="anabolic">Anabolic Steroid</option>
             <option value="hormone">Hormone</option>
             <option value="peptide">Peptide</option>
             <option value="glp">GLP</option>
@@ -310,13 +360,14 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
             <option value="suppository">Suppository</option>
             <option value="topical">Topical</option>
           </select></label>
-          <div class="split"><label>Default amount<input id="item-amount" type="number" min="0" step="any"></label><label>Unit<input id="item-unit" placeholder="mg, mL, tablet"></label></div>
+          <div class="split"><label>Dose per administration<input id="item-amount" type="number" min="0" step="any"></label><label>Dose unit<select id="item-unit"><option value="">Select unit</option><option value="mg">mg</option><option value="mL">mL</option><option value="tablet">Tablet</option><option value="tbsp">TBSP</option><option value="tsp">TSP</option></select></label></div>
           <label>Route<select id="item-route">
             <option value="">Select route</option>
             <option value="intramuscular">Intramuscular</option>
             <option value="subcutaneous">Subcutaneous</option>
             <option value="powder">Powder</option>
             <option value="oral">Oral</option>
+            <option value="topical">Topical</option>
           </select></label>
           <label>Notes<textarea id="item-notes" rows="3" placeholder="Optional private notes"></textarea></label>
           <button class="primary" type="submit">Save item</button>
@@ -407,8 +458,17 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
               return `<article class="inventory-card ${low||expired?'inventory-warning':''}">
                 <div>
                   <div class="inventory-card-title"><b>${esc(row.tracked_items?.name??'Tracked item')}</b>${low?'<span>LOW</span>':''}${expired?'<span>EXPIRED</span>':''}</div>
-                  <strong>${esc(row.quantity)} ${esc(row.unit)}</strong>
-                  <small>${row.lot_number?'Lot '+esc(row.lot_number)+' · ':''}${row.expiration_date?'Expires '+esc(row.expiration_date):'No expiration'}${row.auto_decrement?' · Auto −'+esc(row.decrement_amount??0)+' / completed log':''}</small>
+                  <strong>${esc(row.quantity)} ${esc(row.unit)} total</strong>
+                  <div class="inventory-details">
+                    <span>${esc(row.tracked_items?.category==='anabolic'?'Anabolic Steroid':titleCase(row.tracked_items?.category??'other'))}</span>
+                    ${row.tracked_items?.route?`<span>${esc(titleCase(row.tracked_items.route))}</span>`:''}
+                    ${row.tracked_items?.default_amount!==null && row.tracked_items?.default_amount!==undefined?`<span>${esc(row.tracked_items.default_amount)} ${esc(row.tracked_items.default_unit??'')} / dose</span>`:''}
+                    ${(()=>{
+                      const weekly=weeklyPlanFor(row.tracked_item_id)
+                      return weekly?`<span>${esc(weekly.exact?'':'≈ ')}${esc(weekly.total)} ${esc(weekly.unit)} / week · ${esc(weekly.exact?weekly.occurrences:weekly.occurrences.toFixed(1))} doses</span>`:''
+                    })()}
+                  </div>
+                  <small>${row.lot_number?'Lot '+esc(row.lot_number)+' · ':''}${row.expiration_date?'Expires '+esc(row.expiration_date):'No expiration'}${row.auto_decrement?' · Auto −'+esc(row.decrement_amount??0)+' '+esc(row.unit)+' / completed log':''}</small>
                 </div>
                 <button class="ghost compact" data-inventory-edit="${row.id}">Edit</button>
               </article>`
@@ -422,7 +482,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           <div class="panel-head"><div><span class="kicker">INVENTORY</span><h3 id="inventory-title">Add inventory</h3></div><button class="ghost compact modal-close" type="button">Close</button></div>
           <input id="inventory-id" type="hidden">
           <label>Tracked item<select id="inventory-item" required></select></label>
-          <div class="split"><label>Quantity<input id="inventory-quantity" type="number" min="0" step="any" required></label><label>Unit<input id="inventory-unit" required placeholder="vials, tablets, mL"></label></div>
+          <div class="split"><label>Total amount on hand<input id="inventory-quantity" type="number" min="0" step="any" required></label><label>Inventory unit<select id="inventory-unit" required><option value="">Select unit</option><option value="mg">mg</option><option value="mL">mL</option><option value="tablet">Tablet</option><option value="tbsp">TBSP</option><option value="tsp">TSP</option><option value="vial">Vial</option></select></label></div>
           <div class="split"><label>Low stock threshold<input id="inventory-threshold" type="number" min="0" step="any"></label><label>Expiration date<input id="inventory-expiration" type="date"></label></div>
           <label>Lot number<input id="inventory-lot" maxlength="120" placeholder="Optional"></label>
           <label class="toggle-row"><input id="inventory-auto" type="checkbox"><span>Auto-decrement on completed logs</span></label>
@@ -454,7 +514,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     document.querySelector<HTMLSelectElement>('#item-category')!.value=item?.category??'peptide'
     document.querySelector<HTMLSelectElement>('#item-form-type')!.value=item?.form??'injectable'
     document.querySelector<HTMLInputElement>('#item-amount')!.value=item?.default_amount?.toString()??''
-    document.querySelector<HTMLInputElement>('#item-unit')!.value=item?.default_unit??''
+    document.querySelector<HTMLSelectElement>('#item-unit')!.value=item?.default_unit??''
     document.querySelector<HTMLSelectElement>('#item-route')!.value=item?.route??''
     document.querySelector<HTMLTextAreaElement>('#item-notes')!.value=item?.notes??''
     itemModal.showModal()
@@ -609,7 +669,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     document.querySelector<HTMLInputElement>('#inventory-id')!.value=row?.id??''
     document.querySelector<HTMLHeadingElement>('#inventory-title')!.textContent=row?'Edit inventory':'Add inventory'
     document.querySelector<HTMLInputElement>('#inventory-quantity')!.value=String(row?.quantity??0)
-    document.querySelector<HTMLInputElement>('#inventory-unit')!.value=row?.unit??''
+    document.querySelector<HTMLSelectElement>('#inventory-unit')!.value=row?.unit??''
     document.querySelector<HTMLInputElement>('#inventory-threshold')!.value=row?.low_threshold?.toString()??''
     document.querySelector<HTMLInputElement>('#inventory-lot')!.value=row?.lot_number??''
     document.querySelector<HTMLInputElement>('#inventory-expiration')!.value=row?.expiration_date??''
@@ -635,7 +695,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     const id=document.querySelector<HTMLInputElement>('#inventory-id')!.value
     const tracked_item_id=document.querySelector<HTMLSelectElement>('#inventory-item')!.value
     const quantity=Number(document.querySelector<HTMLInputElement>('#inventory-quantity')!.value||0)
-    const unit=document.querySelector<HTMLInputElement>('#inventory-unit')!.value.trim()
+    const unit=document.querySelector<HTMLSelectElement>('#inventory-unit')!.value
     const thresholdRaw=document.querySelector<HTMLInputElement>('#inventory-threshold')!.value
     const low_threshold=thresholdRaw===''?null:Number(thresholdRaw)
     const lot_number=document.querySelector<HTMLInputElement>('#inventory-lot')!.value.trim()||null
@@ -720,7 +780,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     const category=document.querySelector<HTMLSelectElement>('#item-category')!.value as Category
     const form=document.querySelector<HTMLSelectElement>('#item-form-type')!.value as Form
     const amountRaw=document.querySelector<HTMLInputElement>('#item-amount')!.value
-    const default_unit=document.querySelector<HTMLInputElement>('#item-unit')!.value.trim()||null
+    const default_unit=document.querySelector<HTMLSelectElement>('#item-unit')!.value||null
     const route=document.querySelector<HTMLSelectElement>('#item-route')!.value||null
     const notes=document.querySelector<HTMLTextAreaElement>('#item-notes')!.value.trim()||null
     const payload={name,category,form,default_amount:amountRaw?Number(amountRaw):null,default_unit,route,notes,updated_at:new Date().toISOString()}
@@ -745,6 +805,9 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     const when=document.querySelector<HTMLInputElement>('#log-time')!.value
     const injection_site=item.form==='injectable' || item.category==='injection'
       ? (document.querySelector<HTMLSelectElement>('#log-site')?.value||null) : null
+    if(status==='completed' && (item.form==='injectable' || item.category==='injection') && !injection_site){
+      return alert('Choose an injection site before confirming this completed dose.')
+    }
     const route=document.querySelector<HTMLSelectElement>('#log-route')?.value||null
     const notes=document.querySelector<HTMLTextAreaElement>('#log-notes')!.value.trim()||null
     const schedule_id=document.querySelector<HTMLInputElement>('#log-schedule-id')!.value||null
