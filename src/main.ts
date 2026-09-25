@@ -87,7 +87,12 @@ function renderAuth(message='') {
     boot()
   })
   document.querySelector('#signup')!.addEventListener('click',async()=>{
-    const {error}=await supabase.auth.signUp({email:email(),password:pass()})
+    const emailRedirectTo=new URL(import.meta.env.BASE_URL,window.location.origin).toString()
+    const {error}=await supabase.auth.signUp({
+      email:email(),
+      password:pass(),
+      options:{emailRedirectTo}
+    })
     renderAuth(error ? error.message : 'Account created. Check your email if confirmation is required, then sign in.')
   })
 }
