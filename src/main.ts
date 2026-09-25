@@ -750,6 +750,16 @@ async function renderDashboard(userId:string,email:string,showArchived=false) {
       ? await supabase.from('logs').update(payload).eq('id',logId).eq('user_id',userId)
       : await supabase.from('logs').insert({user_id:userId,tracked_item_id,...payload})
     if(result.error) return alert(result.error.message)
+    if(!logId && status==='completed'){
+      const stock=inventoryByItem.get(tracked_item_id)
+      if(stock?.auto_decrement && stock.decrement_amount && Number(stock.decrement_amount)>0){
+        const nextQuantity=Math.max(0,Number(stock.quantity)-Number(stock.decrement_amount))
+        const {error:inventoryDeductError}=await supabase.from('inventory')
+          .update({quantity:nextQuantity,updated_at:new Date().toISOString()})
+          .eq('id',stock.id).eq('user_id',userId)
+        if(inventoryDeductError) return alert('Log saved, but inventory could not be updated: '+inventoryDeductError.message)
+      }
+    }
     logModal.close()
     if(logId && historyModal.open) return refreshHistory()
     renderDashboard(userId,email,showArchived)
