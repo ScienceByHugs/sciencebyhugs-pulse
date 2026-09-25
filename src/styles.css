@@ -53,3 +53,6 @@
   .inventory-card>button,.inventory-toolbar>button{width:100%}
   .inventory-form-actions{flex-direction:column}
 }
+
+.inventory-details{display:flex;gap:7px;flex-wrap:wrap;margin:2px 0}
+.inventory-details span{border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:5px 8px;color:var(--muted);font-size:.74rem}
