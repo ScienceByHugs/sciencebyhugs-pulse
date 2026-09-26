@@ -1,6 +1,8 @@
 import './styles.css'
+import './brand.css'
 import { supabase } from './supabase'
 
+const pulseLogoUrl = `${import.meta.env.BASE_URL}brand/pulse.svg`
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('App root not found')
 
@@ -73,7 +75,7 @@ async function boot() {
 function renderAuth(message='') {
   app!.innerHTML=`
     <main class="auth-shell">
-      <section class="brand-panel"><div class="eyebrow">SCIENCE BY HUGs</div><h1>PULSE</h1><p>Track. Measure. Evolve.</p><div class="pulse-line"></div></section>
+      <section class="brand-panel"><img class="pulse-auth-lockup" src="${pulseLogoUrl}" alt="Pulse — Science By Hugs"><p>Track. Measure. Evolve.</p><div class="pulse-line"></div></section>
       <section class="auth-card">
         <span class="kicker">PRIVATE TRACKING</span><h2>Welcome to PULSE</h2>
         <p class="muted">Sign in or create your PULSE account.</p>
@@ -230,7 +232,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   app!.innerHTML=`
     <main class="app-shell">
       <header>
-        <div><div class="eyebrow">SCIENCE BY HUGs</div><div class="wordmark">PULSE</div></div>
+        <div><img class="pulse-brand-lockup" src="${pulseLogoUrl}" alt="Pulse — Science By Hugs"></div>
         <button class="ghost compact" id="signout">Sign out</button>
       </header>
 

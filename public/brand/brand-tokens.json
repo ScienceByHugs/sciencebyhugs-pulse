@@ -1,0 +1,22 @@
+{
+  "source": "ScienceByHugs/sciencebyhugs-nexus/docs/brand/BLUE_REACTOR.md",
+  "name": "Science By Hugs — Blue Reactor",
+  "version": "1.0.0",
+  "status": "approved",
+  "colors": {
+    "jetBlack": "#0A0A0B",
+    "cobaltBlue": "#0057FF",
+    "cyanBlue": "#00D2FF",
+    "metallicSilver": "#C0C6D4",
+    "softWhite": "#F7FAFF",
+    "slateGray": "#2E3440",
+    "surface1": "#0D1117",
+    "surface2": "#121923",
+    "muted": "#8A94A6",
+    "success": "#20D6A2",
+    "warning": "#F7B731",
+    "danger": "#FF4D6D"
+  },
+  "typography": {"display":"Space Grotesk","body":"Inter"},
+  "product": {"name":"Pulse","descriptor":"Research Tracking System"}
+}
