@@ -8,19 +8,19 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['brand-mark.svg'],
+      includeAssets: ['brand/science-by-hugs.svg', 'brand/sbh-monogram.svg', 'brand/pulse.svg'],
       manifest: {
         name: 'Science By HUGs Pulse',
         short_name: 'Pulse',
         description: 'Biometric-inspired tracking PWA for schedules, routines, and personal logs.',
-        theme_color: '#05070A',
-        background_color: '#05070A',
+        theme_color: '#0A0A0B',
+        background_color: '#0A0A0B',
         display: 'standalone',
         start_url: base,
         scope: base,
         icons: [
           {
-            src: base + 'brand-mark.svg',
+            src: base + 'brand/sbh-monogram.svg',
             sizes: 'any',
             type: 'image/svg+xml',
             purpose: 'any maskable'
