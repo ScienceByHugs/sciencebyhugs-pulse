@@ -515,11 +515,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       <section class="quick-actions view-section view-today">
         <button class="primary" id="quick-log" ${itemList.length && !showArchived?'':'disabled'}>+ Log dose</button>
         <button class="ghost" id="add-item">+ Add substance</button>
-        <button class="ghost" id="open-cycles">Cycles</button>
         <button class="ghost" id="open-reminders">Reminders</button>
-        <button class="ghost" id="open-inventory">Inventory${inventoryAlerts.length?` · ${inventoryAlerts.length}`:''}</button>
-        <button class="ghost" id="open-settings">Settings & Data</button>
-        <button class="ghost" id="toggle-archive">${showArchived?'View active':'Archived substances'}</button>
+        <button class="ghost" id="open-settings">Settings</button>
       </section>
 
       ${!showArchived?`
@@ -617,7 +614,13 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
 
       <section class="layout view-layout">
         <article class="panel view-section view-stack">
-          <div class="panel-head"><div><span class="kicker">${showArchived?'ARCHIVE':'MY STACK'}</span><h3>${showArchived?'Archived substances':'Your substances'}</h3></div></div>
+          <div class="panel-head">
+            <div><span class="kicker">${showArchived?'ARCHIVE':'MY STACK'}</span><h3>${showArchived?'Archived substances':'Your substances'}</h3></div>
+            <div class="tab-head-actions">
+              <button class="primary compact" id="stack-add-item" type="button">+ Substance</button>
+              <button class="ghost compact" id="toggle-archive">${showArchived?'View active':'Archived'}</button>
+            </div>
+          </div>
           <div class="rows">
             ${itemList.length?itemList.map(i=>`
               <div class="row item-card" data-id="${i.id}">
@@ -636,7 +639,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         </article>
 
         <article class="panel view-section view-history">
-          <div class="panel-head"><div><span class="kicker">HISTORY</span><h3>Recent activity</h3></div><button class="ghost compact" id="open-history">View all</button></div>
+          <div class="panel-head"><div><span class="kicker">HISTORY</span><h3>Recent activity</h3><p class="muted compact-copy">Your latest logged doses and skipped events.</p></div><button class="primary compact" id="open-history">Full timeline</button></div>
           <div class="rows">
             ${recent.length?recent.map(l=>`
               <div class="row log-row">
@@ -651,7 +654,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
 
       ${!showArchived?`
       <section class="panel schedules-panel view-section view-stack">
-        <div class="panel-head"><div><span class="kicker">SCHEDULES</span><h3>Active schedules</h3></div><button class="ghost compact" id="add-schedule-secondary" ${itemList.length?'':'disabled'}>+ Add</button></div>
+        <div class="panel-head"><div><span class="kicker">SCHEDULES</span><h3>Active schedules</h3><p class="muted compact-copy">When PULSE expects each recurring item.</p></div><button class="ghost compact" id="add-schedule-secondary" ${itemList.length?'':'disabled'}>+ Add</button></div>
         <div class="rows">
           ${scheduleList.length?scheduleList.map(s=>`
             <div class="row schedule-row">
@@ -664,19 +667,30 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       ${!showArchived?`
       <section class="panel inventory-preview view-section view-inventory">
         <div class="panel-head">
-          <div><span class="kicker">INVENTORY</span><h3>Stock overview</h3></div>
-          <button class="ghost compact" id="open-inventory-secondary">Manage inventory</button>
+          <div><span class="kicker">INVENTORY</span><h3>Stock & supply</h3><p class="muted compact-copy">${inventoryAlerts.length?inventoryAlerts.length+' item'+(inventoryAlerts.length===1?'':'s')+' need attention':'Everything looks in range'}</p></div>
+          <button class="primary compact" id="inventory-tab-add" ${allItemList.length?'':'disabled'}>+ Inventory</button>
         </div>
-        ${inventoryAlerts.length?`<div class="inventory-alerts">
-          ${inventoryAlerts.slice(0,4).map(row=>{
+        <div class="inventory-tab-grid">
+          ${inventoryList.length?inventoryList.map(row=>{
             const low=row.low_threshold!==null && Number(row.quantity)<=Number(row.low_threshold)
             const expired=!!row.expiration_date && row.expiration_date<todayKey
-            return `<div class="inventory-alert-row">
-              <span><b>${esc(row.tracked_items?.name??'Tracked item')}</b><small>${low?'Low stock':''}${low&&expired?' · ':''}${expired?'Expired':''}</small></span>
+            const item=allItemList.find(i=>i.id===row.tracked_item_id)
+            const supply=item?supplyFor(item):null
+            return `<article class="inventory-tile ${low||expired?'attention':''}">
+              <div class="inventory-tile-head">
+                <span><b>${esc(row.tracked_items?.name??'Tracked item')}</b><small>${esc(row.tracked_items?.category?titleCase(row.tracked_items.category):'Inventory')}</small></span>
+                ${low||expired?`<span class="attention-tag">${expired?'Expired':'Low'}</span>`:''}
+              </div>
               <strong>${esc(row.quantity)} ${esc(row.unit)}</strong>
-            </div>`
-          }).join('')}
-        </div>`:`<p class="empty">No low-stock or expiration alerts.</p>`}
+              <div class="inventory-tile-meta">
+                <span>${row.containers_on_hand!==null?esc(row.containers_on_hand)+' containers':'Containers —'}</span>
+                <span>${supply?Math.floor(supply.doses)+' doses est.':'Dose estimate —'}</span>
+                <span>${supply?.daysRemaining!==null && supply?.daysRemaining!==undefined?Math.floor(supply.daysRemaining)+' days est.':'Runway —'}</span>
+              </div>
+              <button class="ghost compact" data-inventory-edit="${row.id}">Edit</button>
+            </article>`
+          }).join(''):'<p class="empty">No inventory yet. Add stock for a substance to start supply tracking.</p>'}
+        </div>
       </section>`:''}
 
       <dialog id="settings-modal" class="settings-modal">
@@ -1403,7 +1417,6 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   }
 
   const openCycles=()=>cycleModal.showModal()
-  document.querySelector('#open-cycles')!.addEventListener('click',()=>{dashboardView='cycles';sessionStorage.setItem('pulse-dashboard-view','cycles');renderDashboard(userId,email,showArchived)})
   document.querySelector('#open-cycles-secondary')?.addEventListener('click',openCycles)
   document.querySelector('#cycle-tab-create')?.addEventListener('click',()=>openCycleEditor())
   document.querySelector('#active-cycle-details')?.addEventListener('click',()=>{ if(activeCycle) openCycleDetail(activeCycle) })
@@ -1586,8 +1599,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   }
 
   const openInventory=()=>inventoryModal.showModal()
-  document.querySelector('#open-inventory')!.addEventListener('click',()=>{dashboardView='inventory';sessionStorage.setItem('pulse-dashboard-view','inventory');renderDashboard(userId,email,showArchived)})
   document.querySelector('#open-inventory-secondary')?.addEventListener('click',openInventory)
+  document.querySelector('#inventory-tab-add')?.addEventListener('click',()=>openInventoryEditor())
   document.querySelector('#inventory-add')!.addEventListener('click',()=>openInventoryEditor())
   document.querySelector('#inventory-auto')!.addEventListener('change',updateInventoryDecrementVisibility)
   document.querySelectorAll<HTMLButtonElement>('[data-inventory-edit]').forEach(btn=>btn.addEventListener('click',()=>{
@@ -1637,6 +1650,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   })
 
     document.querySelector('#add-item')!.addEventListener('click',()=>openItem())
+  document.querySelector('#stack-add-item')?.addEventListener('click',()=>openItem())
   document.querySelector('#quick-log')?.addEventListener('click',()=>{ if(itemList[0]) openLog(itemList[0]) })
   document.querySelector('#add-schedule')?.addEventListener('click',()=>openSchedule())
   document.querySelector('#add-schedule-secondary')?.addEventListener('click',()=>openSchedule())
