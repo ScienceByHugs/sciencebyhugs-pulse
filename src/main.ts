@@ -5,6 +5,7 @@ import { supabase } from './supabase'
 const pulseLogoUrl = `${import.meta.env.BASE_URL}brand/pulse.svg`
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('App root not found')
+let reminderTimer:number|undefined
 
 type Category = 'anabolic'|'hormone'|'peptide'|'glp'|'medication'|'vitamin'|'supplement'|'injection'|'other'
 type Form = 'injectable'|'oral'|'suppository'|'topical'
@@ -734,27 +735,35 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     new Notification(title,{body,icon:pulseLogoUrl})
   }
 
-  if(reminderPrefs.dose_reminders_enabled){
-    dueSoon.forEach(x=>showBrowserNotification(
-      'pulse-reminder-'+x.schedule.id+'-'+dateKey(today),
-      'PULSE · Dose due soon',
-      `${x.schedule.tracked_items?.name??'Scheduled dose'} is due ${x.schedule.scheduled_time?x.when.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'today'}.`
-    ))
+  const checkReminders=()=>{
+    const now=Date.now()
+    if(reminderPrefs.dose_reminders_enabled){
+      dueToday.filter(x=>!x.status && x.schedule.scheduled_time && x.when.getTime()>=now && x.when.getTime()-now<=reminderPrefs.reminder_lead_minutes*60000)
+        .forEach(x=>showBrowserNotification(
+          'pulse-reminder-'+x.schedule.id+'-'+dateKey(today),
+          'PULSE · Dose due soon',
+          `${x.schedule.tracked_items?.name??'Scheduled dose'} is due ${x.schedule.scheduled_time?x.when.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'today'}.`
+        ))
+    }
+    if(reminderPrefs.overdue_reminders_enabled){
+      dueToday.filter(x=>!x.status && !!x.schedule.scheduled_time && x.when.getTime()<now)
+        .forEach(x=>showBrowserNotification(
+          'pulse-overdue-'+x.schedule.id+'-'+dateKey(today),
+          'PULSE · Dose overdue',
+          `${x.schedule.tracked_items?.name??'Scheduled dose'} is overdue.`
+        ))
+    }
+    if(reminderPrefs.low_stock_notifications_enabled && inventoryAlerts.length){
+      showBrowserNotification(
+        'pulse-inventory-alert-'+dateKey(today),
+        'PULSE · Inventory alert',
+        `${inventoryAlerts.length} item${inventoryAlerts.length===1?'':'s'} need inventory attention.`
+      )
+    }
   }
-  if(reminderPrefs.overdue_reminders_enabled){
-    overdueNow.forEach(x=>showBrowserNotification(
-      'pulse-overdue-'+x.schedule.id+'-'+dateKey(today),
-      'PULSE · Dose overdue',
-      `${x.schedule.tracked_items?.name??'Scheduled dose'} is overdue.`
-    ))
-  }
-  if(reminderPrefs.low_stock_notifications_enabled && inventoryAlerts.length){
-    showBrowserNotification(
-      'pulse-inventory-alert-'+dateKey(today),
-      'PULSE · Inventory alert',
-      `${inventoryAlerts.length} item${inventoryAlerts.length===1?'':'s'} need inventory attention.`
-    )
-  }
+  checkReminders()
+  if(reminderTimer) window.clearInterval(reminderTimer)
+  reminderTimer=window.setInterval(checkReminders,60000)
 
   const openReminders=()=>{
     document.querySelector<HTMLInputElement>('#reminder-dose-enabled')!.checked=reminderPrefs.dose_reminders_enabled
