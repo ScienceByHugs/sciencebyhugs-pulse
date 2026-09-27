@@ -361,6 +361,70 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const dueSoon=dueToday.filter(x=>!x.status && x.schedule.scheduled_time && x.when.getTime()>=Date.now() && x.when.getTime()-Date.now()<=reminderPrefs.reminder_lead_minutes*60000)
   const overdueNow=dueToday.filter(x=>x.overdue)
 
+  const nextDoseFor=(itemId:string)=>{
+    const schedules=scheduleList.filter(s=>s.tracked_item_id===itemId && s.active && s.frequency!=='as_needed')
+    for(let offset=0;offset<60;offset++){
+      const d=new Date(today.getFullYear(),today.getMonth(),today.getDate()+offset)
+      for(const schedule of schedules){
+        if(!scheduleDueOn(schedule,d)) continue
+        const when=occurrenceDate(schedule,d)
+        if(when.getTime()>=Date.now()) return {schedule,when}
+      }
+    }
+    return null
+  }
+
+  const adherenceForItem=(itemId:string,days:number)=>{
+    const start=startOfDay(new Date(today.getFullYear(),today.getMonth(),today.getDate()-(days-1)))
+    let expected=0
+    let completed=0
+    for(const schedule of scheduleList.filter(s=>s.tracked_item_id===itemId && s.active)){
+      for(let offset=0;offset<days;offset++){
+        const d=new Date(start.getFullYear(),start.getMonth(),start.getDate()+offset)
+        if(!scheduleDueOn(schedule,d)) continue
+        const when=occurrenceDate(schedule,d)
+        if(when.getTime()>Date.now()) continue
+        expected++
+        const matching=cycleLogList.find(log=>
+          log.schedule_id===schedule.id &&
+          !!log.scheduled_for &&
+          dateKey(new Date(log.scheduled_for))===dateKey(when)
+        )
+        if(matching?.status==='completed') completed++
+      }
+    }
+    return {expected,completed,percent:expected?Math.round(completed/expected*100):null}
+  }
+
+  const supplyFor=(item:Item)=>{
+    const stock=inventoryByItem.get(item.id)
+    if(!stock || !item.default_amount || !item.default_unit) return null
+    let availableDoses:number|null=null
+    let basis=''
+    if(stock.auto_decrement && stock.decrement_amount && Number(stock.decrement_amount)>0){
+      availableDoses=Number(stock.quantity)/Number(stock.decrement_amount)
+      basis='inventory decrement'
+    }else if(stock.unit===item.default_unit){
+      availableDoses=Number(stock.quantity)/Number(item.default_amount)
+      basis='matching units'
+    }else if(
+      stock.strength_amount!==null && stock.strength_per_amount!==null &&
+      stock.strength_unit===item.default_unit && stock.strength_per_unit===stock.unit &&
+      Number(stock.strength_per_amount)>0
+    ){
+      const totalDoseUnits=Number(stock.quantity)*(Number(stock.strength_amount)/Number(stock.strength_per_amount))
+      availableDoses=totalDoseUnits/Number(item.default_amount)
+      basis='concentration'
+    }
+    if(availableDoses===null || !Number.isFinite(availableDoses)) return null
+    const weekly=weeklyPlanFor(item.id)
+    const daysRemaining=weekly?.occurrences ? availableDoses/weekly.occurrences*7 : null
+    const depletionDate=daysRemaining!==null
+      ? new Date(today.getFullYear(),today.getMonth(),today.getDate()+Math.floor(daysRemaining))
+      : null
+    return {doses:Math.max(0,availableDoses),daysRemaining,depletionDate,basis}
+  }
+
   app!.innerHTML=`
     <main class="app-shell">
       <header>
@@ -442,6 +506,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
                   <span class="dose">${i.default_amount??'—'} ${esc(i.default_unit??'')}</span>
                 </button>
                 <div class="row-actions">
+                  <button class="ghost compact" data-action="details" data-id="${i.id}">Details</button>
                   ${!showArchived?`<button class="ghost compact" data-action="schedule" data-id="${i.id}">Schedule</button>`:''}
                   <button class="ghost compact" data-action="edit" data-id="${i.id}">Edit</button>
                   <button class="ghost compact ${showArchived?'restore':'danger'}" data-action="${showArchived?'restore':'archive'}" data-id="${i.id}">${showArchived?'Restore':'Archive'}</button>
@@ -493,6 +558,16 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           }).join('')}
         </div>`:`<p class="empty">No low-stock or expiration alerts.</p>`}
       </section>`:''}
+
+      <dialog id="substance-detail-modal" class="substance-detail-modal">
+        <section class="substance-detail-shell">
+          <div class="panel-head">
+            <div><span class="kicker" id="substance-detail-kicker">SUBSTANCE</span><h3 id="substance-detail-title">Substance</h3></div>
+            <button class="ghost compact modal-close" type="button">Close</button>
+          </div>
+          <div id="substance-detail-body"><p class="empty">Loading…</p></div>
+        </section>
+      </dialog>
 
       <dialog id="reminder-modal">
         <form id="reminder-form">
@@ -709,6 +784,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   document.querySelector('#signout')!.addEventListener('click',async()=>{await supabase.auth.signOut();renderAuth()})
   document.querySelector('#toggle-archive')!.addEventListener('click',()=>renderDashboard(userId,email,!showArchived))
 
+  const substanceDetailModal=document.querySelector<HTMLDialogElement>('#substance-detail-modal')!
   const reminderModal=document.querySelector<HTMLDialogElement>('#reminder-modal')!
   const cycleModal=document.querySelector<HTMLDialogElement>('#cycle-modal')!
   const cycleEditModal=document.querySelector<HTMLDialogElement>('#cycle-edit-modal')!
@@ -785,6 +861,103 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   }
 
   const openLog=(item:Item,schedule?:Schedule,existing?:Log)=>{ fillLog(item,schedule,existing); logModal.showModal() }
+
+  const openSubstanceDetail=async(item:Item)=>{
+    document.querySelector<HTMLElement>('#substance-detail-kicker')!.textContent=item.category==='anabolic'?'ANABOLIC STEROID':titleCase(item.category)
+    document.querySelector<HTMLElement>('#substance-detail-title')!.textContent=item.name
+    const body=document.querySelector<HTMLElement>('#substance-detail-body')!
+    body.innerHTML='<p class="empty">Loading substance details…</p>'
+    substanceDetailModal.showModal()
+
+    const {data:detailLogs,error}=await supabase.from('logs')
+      .select('id,tracked_item_id,logged_at,amount,unit,status,route,injection_site,notes,schedule_id,scheduled_for')
+      .eq('user_id',userId).eq('tracked_item_id',item.id)
+      .order('logged_at',{ascending:false}).limit(50)
+    if(error){
+      body.innerHTML=`<div class="notice">${esc(error.message)}</div>`
+      return
+    }
+
+    const itemSchedules=scheduleList.filter(s=>s.tracked_item_id===item.id && s.active)
+    const stock=inventoryByItem.get(item.id)
+    const weekly=weeklyPlanFor(item.id)
+    const supply=supplyFor(item)
+    const next=nextDoseFor(item.id)
+    const adh7=adherenceForItem(item.id,7)
+    const adh30=adherenceForItem(item.id,30)
+    const logs=(detailLogs??[]) as Log[]
+    const lastCompleted=logs.find(l=>l.status==='completed')??null
+    const cycleMemberships=cycleItemList
+      .filter(ci=>ci.tracked_item_id===item.id)
+      .map(ci=>cycleList.find(cycle=>cycle.id===ci.cycle_id))
+      .filter((cycle):cycle is Cycle=>!!cycle)
+    const siteHistory=[...new Set(logs.map(l=>l.injection_site).filter((site):site is string=>!!site))].slice(0,8)
+    const concentration=stock?.strength_amount!==null && stock?.strength_amount!==undefined && stock.strength_unit && stock.strength_per_amount!==null && stock.strength_per_unit
+      ? `${stock.strength_amount} ${stock.strength_unit} per ${stock.strength_per_amount} ${stock.strength_per_unit}`
+      : null
+
+    body.innerHTML=`
+      <div class="substance-detail-actions">
+        <button class="primary compact" id="detail-log-dose">Log dose</button>
+        <button class="ghost compact" id="detail-edit-item">Edit substance</button>
+        <button class="ghost compact" id="detail-edit-schedule">${itemSchedules.length?'Edit schedule':'Add schedule'}</button>
+        <button class="ghost compact" id="detail-edit-inventory">${stock?'Adjust inventory':'Add inventory'}</button>
+      </div>
+
+      <div class="detail-grid">
+        <article class="detail-card"><span>DOSE</span><strong>${item.default_amount??'—'} ${esc(item.default_unit??'')}</strong><small>${item.route?esc(titleCase(item.route)):'No route set'}${item.form?' · '+esc(titleCase(item.form)):''}</small></article>
+        <article class="detail-card"><span>WEEKLY TOTAL</span><strong>${weekly?`${weekly.exact?'':'≈ '}${Number(weekly.total.toFixed(2))} ${esc(weekly.unit)}`:'—'}</strong><small>${weekly?`${weekly.exact?weekly.occurrences:Number(weekly.occurrences.toFixed(1))} scheduled doses/week`:'No recurring schedule'}</small></article>
+        <article class="detail-card"><span>NEXT DOSE</span><strong>${next?esc(next.when.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})):'—'}</strong><small>${next?(next.schedule.scheduled_time?esc(next.when.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})):'Any time'):'No upcoming scheduled dose'}</small></article>
+        <article class="detail-card"><span>LAST DOSE</span><strong>${lastCompleted?esc(new Date(lastCompleted.logged_at).toLocaleDateString(undefined,{month:'short',day:'numeric'})):'—'}</strong><small>${lastCompleted?`${lastCompleted.amount??'—'} ${esc(lastCompleted.unit??'')}`:'No completed dose yet'}</small></article>
+      </div>
+
+      <section class="detail-section">
+        <div class="panel-head"><div><span class="kicker">ADHERENCE</span><h4>Scheduled-dose performance</h4></div></div>
+        <div class="detail-grid detail-grid-small">
+          <article class="detail-card"><span>7 DAYS</span><strong>${adh7.percent===null?'—':adh7.percent+'%'}</strong><small>${adh7.completed}/${adh7.expected} expected doses completed</small></article>
+          <article class="detail-card"><span>30 DAYS</span><strong>${adh30.percent===null?'—':adh30.percent+'%'}</strong><small>${adh30.completed}/${adh30.expected} expected doses completed</small></article>
+        </div>
+      </section>
+
+      <section class="detail-section">
+        <div class="panel-head"><div><span class="kicker">INVENTORY</span><h4>Supply intelligence</h4></div></div>
+        ${stock?`
+          <div class="detail-stock">
+            <div><span>ON HAND</span><strong>${esc(stock.quantity)} ${esc(stock.unit)}</strong><small>${stock.containers_on_hand!==null?`${esc(stock.containers_on_hand)} container/unit(s) · `:''}${concentration?esc(concentration):'No concentration set'}</small></div>
+            <div><span>EST. DOSES LEFT</span><strong>${supply?Math.floor(supply.doses):'—'}</strong><small>${supply?'Calculated from '+esc(supply.basis):'Units/concentration do not support a safe conversion'}</small></div>
+            <div><span>EST. SUPPLY</span><strong>${supply?.daysRemaining!==null && supply?.daysRemaining!==undefined?Math.floor(supply.daysRemaining)+' days':'—'}</strong><small>${supply?.depletionDate?'Approx. through '+esc(supply.depletionDate.toLocaleDateString()):'Recurring schedule required'}</small></div>
+            <div><span>LOW STOCK</span><strong>${stock.low_threshold!==null?esc(stock.low_threshold)+' '+esc(stock.unit):'Not set'}</strong><small>${stock.expiration_date?'Expires '+esc(stock.expiration_date):'No expiration set'}</small></div>
+          </div>
+        `:'<p class="empty">No inventory record for this substance.</p>'}
+      </section>
+
+      <section class="detail-section">
+        <div class="panel-head"><div><span class="kicker">CYCLES</span><h4>Cycle membership</h4></div></div>
+        ${cycleMemberships.length?`<div class="detail-chip-row">${cycleMemberships.map(cycle=>`<span>${esc(cycle.name)} · ${esc(titleCase(cycle.status))}</span>`).join('')}</div>`:'<p class="empty">Not assigned to a cycle.</p>'}
+      </section>
+
+      ${item.form==='injectable' || item.category==='injection'?`
+      <section class="detail-section">
+        <div class="panel-head"><div><span class="kicker">INJECTION HISTORY</span><h4>Recent sites used</h4></div></div>
+        ${siteHistory.length?`<div class="detail-chip-row">${siteHistory.map(site=>`<span>${esc(site)}</span>`).join('')}</div>`:'<p class="empty">No injection sites logged yet.</p>'}
+      </section>`:''}
+
+      <section class="detail-section">
+        <div class="panel-head"><div><span class="kicker">RECENT HISTORY</span><h4>Latest activity</h4></div></div>
+        <div class="detail-history">
+          ${logs.length?logs.slice(0,8).map(log=>`<div class="detail-history-row">
+            <span><b>${esc(titleCase(log.status))}</b><small>${esc(new Date(log.logged_at).toLocaleString())}${log.injection_site?' · '+esc(log.injection_site):''}</small></span>
+            <strong>${log.amount??'—'} ${esc(log.unit??'')}</strong>
+          </div>`).join(''):'<p class="empty">No history yet.</p>'}
+        </div>
+      </section>
+    `
+
+    document.querySelector('#detail-log-dose')!.addEventListener('click',()=>{ substanceDetailModal.close(); openLog(item) })
+    document.querySelector('#detail-edit-item')!.addEventListener('click',()=>{ substanceDetailModal.close(); openItem(item) })
+    document.querySelector('#detail-edit-schedule')!.addEventListener('click',()=>{ substanceDetailModal.close(); openSchedule(item,itemSchedules[0]) })
+    document.querySelector('#detail-edit-inventory')!.addEventListener('click',()=>{ substanceDetailModal.close(); openInventoryEditor(stock) })
+  }
 
   const showBrowserNotification=(key:string,title:string,body:string)=>{
     if(!('Notification' in window) || Notification.permission!=='granted') return
@@ -1210,6 +1383,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     const item=itemList.find(i=>i.id===btn.dataset.id); if(!item) return
     const action=btn.dataset.action
     if(action==='log') return openLog(item)
+    if(action==='details') return openSubstanceDetail(item)
     if(action==='schedule') return openSchedule(item)
     if(action==='edit') return openItem(item)
     if(action==='archive' || action==='restore'){
