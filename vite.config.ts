@@ -8,6 +8,9 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        importScripts: ['push-sw.js']
+      },
       includeAssets: ['brand/science-by-hugs.svg', 'brand/sbh-monogram.svg', 'brand/pulse.svg'],
       manifest: {
         name: 'Science By HUGs Pulse',
