@@ -22,6 +22,11 @@ type Schedule = {
   scheduled_time:string|null; days_of_week:number[]|null; interval_days:number|null; start_date:string;
   active:boolean; tracked_items?: { name:string; active?:boolean } | null
 }
+type Cycle = {
+  id:string; name:string; start_date:string; end_date:string|null; status:'planned'|'active'|'completed'|'paused'; notes:string|null
+}
+type CycleItem = { id:string; cycle_id:string; tracked_item_id:string }
+
 type Inventory = {
   id:string; tracked_item_id:string; quantity:number; unit:string; low_threshold:number|null;
   lot_number:string|null; expiration_date:string|null; auto_decrement:boolean; decrement_amount:number|null;
@@ -157,7 +162,7 @@ function categoryFields(item:Item){
 
 async function renderDashboard(userId:string,email:string,showArchived=false,jwtRetry=0) {
   const today=new Date()
-  const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError},{data:inventory,error:inventoryError}] = await Promise.all([
+  const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError},{data:inventory,error:inventoryError},{data:cycles,error:cycleError},{data:cycleItems,error:cycleItemError},{data:cycleLogs,error:cycleLogError}] = await Promise.all([
     supabase.from('tracked_items')
       .select('id,name,category,form,default_amount,default_unit,route,notes,active')
       .eq('user_id',userId).eq('active',!showArchived).order('created_at',{ascending:false}),
@@ -176,10 +181,19 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       .gte('scheduled_for',startOfDay(today).toISOString()).lt('scheduled_for',endOfDay(today).toISOString()),
     supabase.from('inventory')
       .select('id,tracked_item_id,quantity,unit,low_threshold,lot_number,expiration_date,auto_decrement,decrement_amount,strength_amount,strength_unit,strength_per_amount,strength_per_unit,containers_on_hand,tracked_items(name,active,category,route,default_amount,default_unit,form)')
-      .eq('user_id',userId).order('updated_at',{ascending:false})
+      .eq('user_id',userId).order('updated_at',{ascending:false}),
+    supabase.from('cycles')
+      .select('id,name,start_date,end_date,status,notes')
+      .eq('user_id',userId).order('start_date',{ascending:false}),
+    supabase.from('cycle_items')
+      .select('id,cycle_id,tracked_item_id')
+      .eq('user_id',userId),
+    supabase.from('logs')
+      .select('tracked_item_id,logged_at,status')
+      .eq('user_id',userId).order('logged_at',{ascending:false}).limit(1000)
   ])
-  if(itemError || allItemError || logError || scheduleError || todayLogError || inventoryError) {
-    const problem=itemError?.message??allItemError?.message??logError?.message??scheduleError?.message??todayLogError?.message??inventoryError?.message
+  if(itemError || allItemError || logError || scheduleError || todayLogError || inventoryError || cycleError || cycleItemError || cycleLogError) {
+    const problem=itemError?.message??allItemError?.message??logError?.message??scheduleError?.message??todayLogError?.message??inventoryError?.message??cycleError?.message??cycleItemError?.message??cycleLogError?.message
     if(jwtRetry<1 && problem?.toLowerCase().includes('jwt issued at future')){
       await new Promise(resolve=>setTimeout(resolve,1500))
       return renderDashboard(userId,email,showArchived,jwtRetry+1)
@@ -193,6 +207,9 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const recent=(logs??[]) as unknown as Log[]
   const scheduleList=(schedules??[]) as unknown as Schedule[]
   const inventoryList=(inventory??[]) as unknown as Inventory[]
+  const cycleList=(cycles??[]) as Cycle[]
+  const cycleItemList=(cycleItems??[]) as CycleItem[]
+  const cycleLogList=(cycleLogs??[]) as {tracked_item_id:string;logged_at:string;status:string}[]
   const inventoryByItem=new Map(inventoryList.map(row=>[row.tracked_item_id,row]))
   const todayKey=dateKey(today)
   const lowInventory=inventoryList.filter(row=>row.low_threshold!==null && Number(row.quantity)<=Number(row.low_threshold))
@@ -229,6 +246,27 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const completedToday=dueToday.filter(x=>x.status==='completed').length
   const skippedToday=dueToday.filter(x=>x.status==='skipped').length
 
+  const activeCycle=cycleList.find(c=>c.status==='active')??null
+  const activeCycleItemIds=new Set(cycleItemList.filter(ci=>ci.cycle_id===activeCycle?.id).map(ci=>ci.tracked_item_id))
+  const cycleStart=activeCycle?new Date(activeCycle.start_date+'T00:00:00'):null
+  const cycleEnd=activeCycle?.end_date?new Date(activeCycle.end_date+'T23:59:59'):null
+  const cycleRelevantLogs=activeCycle?cycleLogList.filter(l=>{
+    if(!activeCycleItemIds.has(l.tracked_item_id)) return false
+    const d=new Date(l.logged_at)
+    if(cycleStart && d<cycleStart) return false
+    if(cycleEnd && d>cycleEnd) return false
+    return true
+  }):[]
+  const cycleCompleted=cycleRelevantLogs.filter(l=>l.status==='completed').length
+  const cycleSkipped=cycleRelevantLogs.filter(l=>l.status==='skipped').length
+  const cycleAdherence=(cycleCompleted+cycleSkipped)>0?Math.round(cycleCompleted/(cycleCompleted+cycleSkipped)*100):null
+  const cycleProgress=(()=>{
+    if(!activeCycle || !cycleStart || !cycleEnd) return null
+    const total=Math.max(1,cycleEnd.getTime()-cycleStart.getTime())
+    const elapsed=Math.min(total,Math.max(0,today.getTime()-cycleStart.getTime()))
+    return Math.round(elapsed/total*100)
+  })()
+
   app!.innerHTML=`
     <main class="app-shell">
       <header>
@@ -236,13 +274,14 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         <button class="ghost compact" id="signout">Sign out</button>
       </header>
 
-      <section class="welcome"><span class="kicker">TRACKER</span><h2>Good to see you.</h2><p class="muted">${esc(email)}</p></section>
+      <section class="welcome"><span class="kicker">YOUR PROTOCOL</span><h2>Stay on schedule.</h2><p class="muted">${esc(email)}</p></section>
 
       <section class="quick-actions">
-        <button class="primary" id="quick-log" ${itemList.length && !showArchived?'':'disabled'}>+ Quick log</button>
-        <button class="ghost" id="add-item">+ New tracked item</button>
+        <button class="primary" id="quick-log" ${itemList.length && !showArchived?'':'disabled'}>+ Log dose</button>
+        <button class="ghost" id="add-item">+ Add substance</button>
+        <button class="ghost" id="open-cycles">Cycles</button>
         <button class="ghost" id="open-inventory">Inventory${inventoryAlerts.length?` · ${inventoryAlerts.length}`:''}</button>
-        <button class="ghost" id="toggle-archive">${showArchived?'View active':'View archived'}</button>
+        <button class="ghost" id="toggle-archive">${showArchived?'View active':'Archived substances'}</button>
       </section>
 
       ${!showArchived?`
@@ -273,15 +312,32 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         </div>
       </section>`:''}
 
-      <section class="stats">
-        <article><span>${showArchived?'ARCHIVED':'ACTIVE'} ITEMS</span><strong>${itemList.length}</strong></article>
-        <article><span>ACTIVE SCHEDULES</span><strong>${scheduleList.length}</strong></article>
-        <article><span>INVENTORY ALERTS</span><strong class="${inventoryAlerts.length?'inventory-alert-count':'online'}">${inventoryAlerts.length||'● Clear'}</strong></article>
+      <section class="stats v2-stats">
+        <article><span>DUE TODAY</span><strong>${dueToday.filter(x=>!x.status).length}</strong></article>
+        <article><span>ACTIVE SUBSTANCES</span><strong>${itemList.length}</strong></article>
+        <article><span>LOW STOCK / EXPIRED</span><strong class="${inventoryAlerts.length?'inventory-alert-count':'online'}">${inventoryAlerts.length||'● Clear'}</strong></article>
       </section>
+
+      ${!showArchived?`
+      <section class="panel cycle-overview ${activeCycle?'':'cycle-empty'}">
+        <div class="panel-head">
+          <div><span class="kicker">CURRENT CYCLE</span><h3>${activeCycle?esc(activeCycle.name):'No active cycle'}</h3></div>
+          <button class="ghost compact" id="open-cycles-secondary">${activeCycle?'Manage cycle':'Create cycle'}</button>
+        </div>
+        ${activeCycle?`
+          <div class="cycle-metrics">
+            <div><span>PROGRESS</span><strong>${cycleProgress===null?'Ongoing':cycleProgress+'%'}</strong></div>
+            <div><span>LOGGED ADHERENCE</span><strong>${cycleAdherence===null?'—':cycleAdherence+'%'}</strong></div>
+            <div><span>SUBSTANCES</span><strong>${activeCycleItemIds.size}</strong></div>
+            <div><span>DATES</span><strong>${esc(activeCycle.start_date)}${activeCycle.end_date?' → '+esc(activeCycle.end_date):' → ongoing'}</strong></div>
+          </div>
+          ${cycleProgress!==null?`<div class="cycle-progress-track"><span style="width:${cycleProgress}%"></span></div>`:''}
+        `:`<p class="empty">Create a cycle to group substances together and track progress over time.</p>`}
+      </section>`:''}
 
       <section class="layout">
         <article class="panel">
-          <div class="panel-head"><div><span class="kicker">${showArchived?'ARCHIVE':'TRACK'}</span><h3>${showArchived?'Archived items':'Your items'}</h3></div></div>
+          <div class="panel-head"><div><span class="kicker">${showArchived?'ARCHIVE':'MY STACK'}</span><h3>${showArchived?'Archived substances':'Your substances'}</h3></div></div>
           <div class="rows">
             ${itemList.length?itemList.map(i=>`
               <div class="row item-card" data-id="${i.id}">
@@ -341,6 +397,40 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           }).join('')}
         </div>`:`<p class="empty">No low-stock or expiration alerts.</p>`}
       </section>`:''}
+
+      <dialog id="cycle-modal" class="cycle-modal">
+        <section class="cycle-shell">
+          <div class="panel-head">
+            <div><span class="kicker">CYCLES</span><h3>Cycles & protocols</h3><p class="muted">Group substances into a cycle and track time-based progress.</p></div>
+            <button class="ghost compact modal-close" type="button">Close</button>
+          </div>
+          <button class="primary compact" id="cycle-add" type="button">+ New cycle</button>
+          <div class="cycle-list">
+            ${cycleList.length?cycleList.map(cycle=>{
+              const members=cycleItemList.filter(ci=>ci.cycle_id===cycle.id)
+              return `<article class="cycle-card ${cycle.status==='active'?'active':''}">
+                <div><b>${esc(cycle.name)}</b><small>${esc(titleCase(cycle.status))} · ${esc(cycle.start_date)}${cycle.end_date?' → '+esc(cycle.end_date):' → ongoing'} · ${members.length} substance${members.length===1?'':'s'}</small></div>
+                <button class="ghost compact" data-cycle-edit="${cycle.id}">Edit</button>
+              </article>`
+            }).join(''):'<p class="empty">No cycles yet.</p>'}
+          </div>
+        </section>
+      </dialog>
+
+      <dialog id="cycle-edit-modal">
+        <form id="cycle-form">
+          <div class="panel-head"><div><span class="kicker">CYCLE</span><h3 id="cycle-title">New cycle</h3></div><button class="ghost compact modal-close" type="button">Close</button></div>
+          <input id="cycle-id" type="hidden">
+          <label>Name<input id="cycle-name" required maxlength="120" placeholder="e.g. 12-week cycle"></label>
+          <div class="split"><label>Start date<input id="cycle-start" type="date" required></label><label>End date<input id="cycle-end" type="date"></label></div>
+          <label>Status<select id="cycle-status"><option value="planned">Planned</option><option value="active">Active</option><option value="paused">Paused</option><option value="completed">Completed</option></select></label>
+          <fieldset class="cycle-items-fieldset"><legend>Substances in this cycle</legend>
+            <div class="cycle-item-picker">${allItemList.map(i=>`<label class="cycle-check"><input type="checkbox" value="${i.id}"><span>${esc(i.name)}</span></label>`).join('')}</div>
+          </fieldset>
+          <label>Notes<textarea id="cycle-notes" rows="3" placeholder="Optional notes"></textarea></label>
+          <div class="cycle-form-actions"><button class="primary" type="submit">Save cycle</button><button class="ghost danger" id="cycle-delete" type="button" hidden>Delete cycle</button></div>
+        </form>
+      </dialog>
 
       <dialog id="item-modal">
         <form id="item-form">
@@ -506,6 +596,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   document.querySelector('#signout')!.addEventListener('click',async()=>{await supabase.auth.signOut();renderAuth()})
   document.querySelector('#toggle-archive')!.addEventListener('click',()=>renderDashboard(userId,email,!showArchived))
 
+  const cycleModal=document.querySelector<HTMLDialogElement>('#cycle-modal')!
+  const cycleEditModal=document.querySelector<HTMLDialogElement>('#cycle-edit-modal')!
   const itemModal=document.querySelector<HTMLDialogElement>('#item-modal')!
   const scheduleModal=document.querySelector<HTMLDialogElement>('#schedule-modal')!
   const logModal=document.querySelector<HTMLDialogElement>('#log-modal')!
@@ -579,6 +671,65 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   }
 
   const openLog=(item:Item,schedule?:Schedule,existing?:Log)=>{ fillLog(item,schedule,existing); logModal.showModal() }
+
+  const openCycleEditor=(cycle?:Cycle)=>{
+    document.querySelector<HTMLInputElement>('#cycle-id')!.value=cycle?.id??''
+    document.querySelector<HTMLHeadingElement>('#cycle-title')!.textContent=cycle?'Edit cycle':'New cycle'
+    document.querySelector<HTMLInputElement>('#cycle-name')!.value=cycle?.name??''
+    document.querySelector<HTMLInputElement>('#cycle-start')!.value=cycle?.start_date??dateKey(today)
+    document.querySelector<HTMLInputElement>('#cycle-end')!.value=cycle?.end_date??''
+    document.querySelector<HTMLSelectElement>('#cycle-status')!.value=cycle?.status??'planned'
+    document.querySelector<HTMLTextAreaElement>('#cycle-notes')!.value=cycle?.notes??''
+    const selected=new Set(cycleItemList.filter(ci=>ci.cycle_id===cycle?.id).map(ci=>ci.tracked_item_id))
+    document.querySelectorAll<HTMLInputElement>('.cycle-item-picker input').forEach(cb=>cb.checked=selected.has(cb.value))
+    document.querySelector<HTMLButtonElement>('#cycle-delete')!.hidden=!cycle
+    cycleEditModal.showModal()
+  }
+
+  const openCycles=()=>cycleModal.showModal()
+  document.querySelector('#open-cycles')!.addEventListener('click',openCycles)
+  document.querySelector('#open-cycles-secondary')?.addEventListener('click',openCycles)
+  document.querySelector('#cycle-add')!.addEventListener('click',()=>openCycleEditor())
+  document.querySelectorAll<HTMLButtonElement>('[data-cycle-edit]').forEach(btn=>btn.addEventListener('click',()=>{
+    const cycle=cycleList.find(c=>c.id===btn.dataset.cycleEdit)
+    if(cycle) openCycleEditor(cycle)
+  }))
+
+  document.querySelector('#cycle-form')!.addEventListener('submit',async e=>{
+    e.preventDefault()
+    const id=document.querySelector<HTMLInputElement>('#cycle-id')!.value
+    const name=document.querySelector<HTMLInputElement>('#cycle-name')!.value.trim()
+    const start_date=document.querySelector<HTMLInputElement>('#cycle-start')!.value
+    const end_date=document.querySelector<HTMLInputElement>('#cycle-end')!.value||null
+    const status=document.querySelector<HTMLSelectElement>('#cycle-status')!.value
+    const notes=document.querySelector<HTMLTextAreaElement>('#cycle-notes')!.value.trim()||null
+    const selected=Array.from(document.querySelectorAll<HTMLInputElement>('.cycle-item-picker input:checked')).map(cb=>cb.value)
+    const payload={name,start_date,end_date,status,notes,updated_at:new Date().toISOString()}
+    let cycleId=id
+    if(id){
+      const {error}=await supabase.from('cycles').update(payload).eq('id',id).eq('user_id',userId)
+      if(error) return alert(error.message)
+    }else{
+      const {data,error}=await supabase.from('cycles').insert({user_id:userId,...payload}).select('id').single()
+      if(error) return alert(error.message)
+      cycleId=data.id
+    }
+    const {error:deleteLinksError}=await supabase.from('cycle_items').delete().eq('cycle_id',cycleId).eq('user_id',userId)
+    if(deleteLinksError) return alert(deleteLinksError.message)
+    if(selected.length){
+      const {error:linkError}=await supabase.from('cycle_items').insert(selected.map(tracked_item_id=>({user_id:userId,cycle_id:cycleId,tracked_item_id})))
+      if(linkError) return alert(linkError.message)
+    }
+    cycleEditModal.close(); cycleModal.close(); renderDashboard(userId,email,showArchived)
+  })
+
+  document.querySelector('#cycle-delete')!.addEventListener('click',async()=>{
+    const id=document.querySelector<HTMLInputElement>('#cycle-id')!.value
+    if(!id || !confirm('Delete this cycle? Your dose history will remain.')) return
+    const {error}=await supabase.from('cycles').delete().eq('id',id).eq('user_id',userId)
+    if(error) return alert(error.message)
+    cycleEditModal.close(); cycleModal.close(); renderDashboard(userId,email,showArchived)
+  })
 
   const historyFilterValues=()=>({
     search:document.querySelector<HTMLInputElement>('#history-search')!.value.trim().toLowerCase(),
