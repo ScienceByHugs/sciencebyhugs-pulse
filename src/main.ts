@@ -484,12 +484,22 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
 
   app!.innerHTML=`
     <main class="app-shell">
-      <header>
-        <div><img class="pulse-brand-lockup" src="${pulseLogoUrl}" alt="Pulse — Science By Hugs"></div>
+      <header class="pulse-header">
+        <div class="pulse-header-brand">
+          <img class="pulse-brand-lockup" src="${pulseLogoUrl}" alt="Pulse — Science By Hugs">
+          <div class="pulse-system-state"><span class="system-dot"></span><span>TRACKING SYSTEM ONLINE</span></div>
+        </div>
         <button class="ghost compact" id="signout">Sign out</button>
       </header>
 
-      <section class="welcome"><span class="kicker">YOUR PROTOCOL</span><h2>Stay on schedule.</h2><p class="muted">${esc(email)}</p></section>
+      <section class="welcome pulse-hero">
+        <div class="pulse-hero-copy">
+          <span class="kicker">PERSONAL PROTOCOL TELEMETRY</span>
+          <h2>Stay on schedule.</h2>
+          <p class="muted">${esc(email)}</p>
+        </div>
+        <div class="pulse-hero-signal" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      </section>
 
       <section class="quick-actions">
         <button class="primary" id="quick-log" ${itemList.length && !showArchived?'':'disabled'}>+ Log dose</button>
@@ -531,16 +541,16 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       </section>`:''}
 
       <section class="stats v2-stats adherence-stats">
-        <article><span>DUE TODAY</span><strong>${dueToday.filter(x=>!x.status).length}</strong><small>${dueSoon.length} due soon · ${overdueNow.length} overdue</small></article>
-        <article><span>7-DAY ADHERENCE</span><strong>${adherence7d===null?'—':adherence7d+'%'}</strong><small>${completedExpected}/${expectedCount} expected doses completed</small></article>
-        <article><span>LOW STOCK / EXPIRED</span><strong class="${inventoryAlerts.length?'inventory-alert-count':'online'}">${inventoryAlerts.length||'● Clear'}</strong><small>${inventoryAlerts.length?'Review inventory':'Inventory looks good'}</small></article>
+        <article class="metric-card metric-due"><span>DUE TODAY</span><strong>${dueToday.filter(x=>!x.status).length}</strong><small>${dueSoon.length} due soon · ${overdueNow.length} overdue</small></article>
+        <article class="metric-card metric-adherence"><span>7-DAY ADHERENCE</span><strong>${adherence7d===null?'—':adherence7d+'%'}</strong><small>${completedExpected}/${expectedCount} expected doses completed</small></article>
+        <article class="metric-card metric-inventory"><span>LOW STOCK / EXPIRED</span><strong class="${inventoryAlerts.length?'inventory-alert-count':'online'}">${inventoryAlerts.length||'● Clear'}</strong><small>${inventoryAlerts.length?'Review inventory':'Inventory looks good'}</small></article>
       </section>
 
       ${!showArchived?`
       <section class="panel beta-analytics">
         <div class="panel-head">
           <div><span class="kicker">BETA SNAPSHOT</span><h3>Last 7 days</h3></div>
-          <span class="beta-badge">v0.9 BETA</span>
+          <span class="beta-badge"><i></i> PRIVATE BETA · v0.9</span>
         </div>
         <div class="adherence-trend">
           ${adherenceTrend.map(day=>`<div class="trend-day">

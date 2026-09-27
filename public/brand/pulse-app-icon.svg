@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PULSE">
+  <defs>
+    <radialGradient id="bg" cx="35%" cy="20%" r="90%">
+      <stop offset="0" stop-color="#111A2A"/>
+      <stop offset=".52" stop-color="#08111C"/>
+      <stop offset="1" stop-color="#05070A"/>
+    </radialGradient>
+    <linearGradient id="pulse" x1="0" x2="1">
+      <stop stop-color="#0057FF"/>
+      <stop offset=".55" stop-color="#00D2FF"/>
+      <stop offset="1" stop-color="#20D6A2"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="172" fill="none" stroke="#00D2FF" stroke-opacity=".14" stroke-width="2"/>
+  <circle cx="256" cy="256" r="132" fill="none" stroke="#0057FF" stroke-opacity=".12" stroke-width="2" stroke-dasharray="7 12"/>
+  <g fill="none" stroke="url(#pulse)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <path d="M92 268h76l28-70 44 140 48-176 38 106h94"/>
+  </g>
+  <circle cx="420" cy="268" r="9" fill="#20D6A2"/>
+  <path d="M126 386h260" stroke="#F7FAFF" stroke-opacity=".09" stroke-width="2"/>
+  <text x="256" y="432" text-anchor="middle" fill="#F7FAFF" font-family="Space Grotesk,Inter,Arial,sans-serif" font-size="52" font-weight="800" letter-spacing="8">PULSE</text>
+</svg>
