@@ -58,3 +58,31 @@
 .inventory-details span{border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:5px 8px;color:var(--muted);font-size:.74rem}
 
 .inventory-strength{font-weight:800;color:var(--secondary);font-size:.88rem}
+
+.cycle-overview{margin-bottom:12px}
+.cycle-empty{border-style:dashed}
+.cycle-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:8px}
+.cycle-metrics>div{background:var(--surface2);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px}
+.cycle-metrics span{display:block;color:var(--muted);font-size:.68rem;font-weight:800;letter-spacing:.12em}
+.cycle-metrics strong{display:block;margin-top:7px;font-size:1rem}
+.cycle-progress-track{height:8px;background:rgba(255,255,255,.06);border-radius:999px;overflow:hidden;margin-top:14px}
+.cycle-progress-track span{display:block;height:100%;background:linear-gradient(90deg,var(--primary),var(--secondary))}
+.cycle-modal{width:min(820px,calc(100% - 28px));max-height:92vh}
+.cycle-shell,#cycle-form{display:grid;gap:16px}
+.cycle-list{display:grid;gap:9px}
+.cycle-card{display:flex;justify-content:space-between;align-items:center;gap:14px;background:var(--surface2);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px}
+.cycle-card>div{display:grid;gap:5px}
+.cycle-card.active{border-color:rgba(0,229,255,.35);box-shadow:inset 3px 0 0 var(--primary)}
+.cycle-items-fieldset{border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px}
+.cycle-items-fieldset legend{color:var(--muted);font-size:.82rem;font-weight:700;padding:0 6px}
+.cycle-item-picker{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.cycle-check{display:flex;align-items:center;gap:9px;background:var(--surface2);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px}
+.cycle-check input{width:auto}
+.cycle-form-actions{display:flex;gap:10px}
+.cycle-form-actions>*{flex:1}
+@media(max-width:760px){
+  .cycle-metrics{grid-template-columns:1fr 1fr}
+  .cycle-card{align-items:stretch;flex-direction:column}
+  .cycle-card>button{width:100%}
+  .cycle-item-picker{grid-template-columns:1fr}
+}
