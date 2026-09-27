@@ -86,3 +86,6 @@
   .cycle-card>button{width:100%}
   .cycle-item-picker{grid-template-columns:1fr}
 }
+
+.adherence-stats article small{display:block;margin-top:6px;color:var(--muted);font-size:.74rem}
+#reminder-form{display:grid;gap:14px;margin-top:18px}
