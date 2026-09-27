@@ -985,7 +985,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   document.querySelector('#settings-delete-data')!.addEventListener('click',async()=>{
     const confirmation=prompt('This permanently deletes your PULSE tracking data but keeps your account. Type DELETE to continue.')
     if(confirmation!=='DELETE') return
-    const tables=['push_subscriptions','cycle_items','cycles','logs','schedules','inventory','tracked_items','notification_preferences']
+    const tables=['push_subscriptions','push_delivery_log','cycle_items','cycles','logs','schedules','inventory','tracked_items','notification_preferences']
     for(const table of tables){
       const {error}=await supabase.from(table).delete().eq('user_id',userId)
       if(error) return alert(`Could not delete ${table}: ${error.message}`)
