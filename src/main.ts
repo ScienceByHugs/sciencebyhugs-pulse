@@ -101,6 +101,7 @@ function renderAuth(message='') {
           <label>Password<input id="password" type="password" minlength="8" required autocomplete="current-password"></label>
           <button class="primary" type="submit">Sign in</button>
           <button class="ghost" id="signup" type="button">Create account</button>
+          <button class="text-button" id="forgot-password" type="button">Forgot password?</button>
         </form>
       </section>
     </main>`
@@ -120,6 +121,12 @@ function renderAuth(message='') {
       options:{emailRedirectTo}
     })
     renderAuth(error ? error.message : 'Account created. Check your email if confirmation is required, then sign in.')
+  })
+  document.querySelector('#forgot-password')!.addEventListener('click',async()=>{
+    if(!email()) return renderAuth('Enter your email address first.')
+    const redirectTo=new URL(import.meta.env.BASE_URL,window.location.origin).toString()
+    const {error}=await supabase.auth.resetPasswordForEmail(email(),{redirectTo})
+    renderAuth(error?error.message:'Password reset email sent. Check your inbox.')
   })
 }
 
@@ -404,10 +411,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       percent:expected.length?Math.round(completed/expected.length*100):null
     }
   })
-  const runwayWarnings=allItemList
-    .map(item=>({item,supply:supplyFor(item)}))
-    .filter(row=>row.supply?.daysRemaining!==null && row.supply?.daysRemaining!==undefined && row.supply.daysRemaining<=14)
-    .sort((a,b)=>(a.supply!.daysRemaining??999)-(b.supply!.daysRemaining??999))
+
 
   const nextDoseFor=(itemId:string)=>{
     const schedules=scheduleList.filter(s=>s.tracked_item_id===itemId && s.active && s.frequency!=='as_needed')
@@ -472,6 +476,11 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       : null
     return {doses:Math.max(0,availableDoses),daysRemaining,depletionDate,basis}
   }
+
+  const runwayWarnings=allItemList
+    .map(item=>({item,supply:supplyFor(item)}))
+    .filter(row=>row.supply?.daysRemaining!==null && row.supply?.daysRemaining!==undefined && row.supply.daysRemaining<=14)
+    .sort((a,b)=>(a.supply!.daysRemaining??999)-(b.supply!.daysRemaining??999))
 
   app!.innerHTML=`
     <main class="app-shell">
@@ -646,6 +655,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
             <button class="primary" id="settings-export" type="button">Export my PULSE data</button>
             <button class="ghost" id="settings-reset-password" type="button">Send password reset email</button>
             <button class="ghost" id="settings-install" type="button">Install / Add PULSE to Home Screen</button>
+            <button class="ghost danger" id="settings-delete-data" type="button">Delete all tracking data</button>
           </div>
           <section class="beta-disclosure">
             <span class="kicker">BETA NOTICE</span>
@@ -970,6 +980,19 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     }
     const isiOS=/iphone|ipad|ipod/i.test(navigator.userAgent)
     alert(isiOS?'On iPhone/iPad: open PULSE in Safari, tap Share, then choose Add to Home Screen.':'Use your browser menu and choose Install app or Add to Home screen.')
+  })
+
+  document.querySelector('#settings-delete-data')!.addEventListener('click',async()=>{
+    const confirmation=prompt('This permanently deletes your PULSE tracking data but keeps your account. Type DELETE to continue.')
+    if(confirmation!=='DELETE') return
+    const tables=['push_subscriptions','cycle_items','cycles','logs','schedules','inventory','tracked_items','notification_preferences']
+    for(const table of tables){
+      const {error}=await supabase.from(table).delete().eq('user_id',userId)
+      if(error) return alert(`Could not delete ${table}: ${error.message}`)
+    }
+    settingsModal.close()
+    await renderDashboard(userId,email,false)
+    alert('Your PULSE tracking data was deleted. Your login account remains active.')
   })
 
   const settingsModal=document.querySelector<HTMLDialogElement>('#settings-modal')!
@@ -1665,10 +1688,10 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     if(!logId && status==='completed'){
       const stock=inventoryByItem.get(tracked_item_id)
       if(stock?.auto_decrement && stock.decrement_amount && Number(stock.decrement_amount)>0){
-        const nextQuantity=Math.max(0,Number(stock.quantity)-Number(stock.decrement_amount))
-        const {error:inventoryDeductError}=await supabase.from('inventory')
-          .update({quantity:nextQuantity,updated_at:new Date().toISOString()})
-          .eq('id',stock.id).eq('user_id',userId)
+        const {error:inventoryDeductError}=await supabase.rpc('decrement_inventory',{
+          p_inventory_id:stock.id,
+          p_amount:Number(stock.decrement_amount)
+        })
         if(inventoryDeductError) return alert('Log saved, but inventory could not be updated: '+inventoryDeductError.message)
       }
     }
