@@ -7,6 +7,11 @@ const pushFunctionUrl = 'https://pspiqukuhtazmkyfleii.supabase.co/functions/v1/p
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('App root not found')
 let reminderTimer:number|undefined
+let deferredInstallPrompt:any=null
+window.addEventListener('beforeinstallprompt',(event:any)=>{
+  event.preventDefault()
+  deferredInstallPrompt=event
+})
 
 type Category = 'anabolic'|'hormone'|'peptide'|'glp'|'medication'|'vitamin'|'supplement'|'injection'|'other'
 type Form = 'injectable'|'oral'|'suppository'|'topical'
@@ -96,6 +101,7 @@ function renderAuth(message='') {
           <label>Password<input id="password" type="password" minlength="8" required autocomplete="current-password"></label>
           <button class="primary" type="submit">Sign in</button>
           <button class="ghost" id="signup" type="button">Create account</button>
+          <button class="text-button" id="forgot-password" type="button">Forgot password?</button>
         </form>
       </section>
     </main>`
@@ -115,6 +121,38 @@ function renderAuth(message='') {
       options:{emailRedirectTo}
     })
     renderAuth(error ? error.message : 'Account created. Check your email if confirmation is required, then sign in.')
+  })
+  document.querySelector('#forgot-password')!.addEventListener('click',async()=>{
+    if(!email()) return renderAuth('Enter your email address first.')
+    const redirectTo=new URL(import.meta.env.BASE_URL,window.location.origin).toString()
+    const {error}=await supabase.auth.resetPasswordForEmail(email(),{redirectTo})
+    renderAuth(error?error.message:'Password reset email sent. Check your inbox.')
+  })
+}
+
+function renderPasswordReset(message=''){
+  app!.innerHTML=`
+    <main class="auth-shell">
+      <section class="brand-panel"><img class="pulse-auth-lockup" src="${pulseLogoUrl}" alt="Pulse — Science By Hugs"><p>Track. Measure. Evolve.</p><div class="pulse-line"></div></section>
+      <section class="auth-card">
+        <span class="kicker">ACCOUNT RECOVERY</span><h2>Choose a new password</h2>
+        <p class="muted">Use at least 8 characters.</p>
+        ${message?`<div class="notice">${esc(message)}</div>`:''}
+        <form id="password-update-form">
+          <label>New password<input id="new-password" type="password" minlength="8" required autocomplete="new-password"></label>
+          <label>Confirm password<input id="confirm-password" type="password" minlength="8" required autocomplete="new-password"></label>
+          <button class="primary" type="submit">Update password</button>
+        </form>
+      </section>
+    </main>`
+  document.querySelector('#password-update-form')!.addEventListener('submit',async e=>{
+    e.preventDefault()
+    const password=document.querySelector<HTMLInputElement>('#new-password')!.value
+    const confirm=document.querySelector<HTMLInputElement>('#confirm-password')!.value
+    if(password!==confirm) return renderPasswordReset('Passwords do not match.')
+    const {error}=await supabase.auth.updateUser({password})
+    if(error) return renderPasswordReset(error.message)
+    await boot()
   })
 }
 
@@ -360,6 +398,20 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const adherence7d=expectedCount?Math.round(completedExpected/expectedCount*100):null
   const dueSoon=dueToday.filter(x=>!x.status && x.schedule.scheduled_time && x.when.getTime()>=Date.now() && x.when.getTime()-Date.now()<=reminderPrefs.reminder_lead_minutes*60000)
   const overdueNow=dueToday.filter(x=>x.overdue)
+  const adherenceTrend=Array.from({length:7},(_,index)=>{
+    const d=new Date(today.getFullYear(),today.getMonth(),today.getDate()-(6-index))
+    const key=dateKey(d)
+    const expected=expectedOccurrences.filter(x=>dateKey(x.when)===key)
+    const completed=expected.filter(x=>x.status==='completed').length
+    return {
+      key,
+      label:d.toLocaleDateString(undefined,{weekday:'short'}),
+      expected:expected.length,
+      completed,
+      percent:expected.length?Math.round(completed/expected.length*100):null
+    }
+  })
+
 
   const nextDoseFor=(itemId:string)=>{
     const schedules=scheduleList.filter(s=>s.tracked_item_id===itemId && s.active && s.frequency!=='as_needed')
@@ -425,6 +477,11 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     return {doses:Math.max(0,availableDoses),daysRemaining,depletionDate,basis}
   }
 
+  const runwayWarnings=allItemList
+    .map(item=>({item,supply:supplyFor(item)}))
+    .filter(row=>row.supply?.daysRemaining!==null && row.supply?.daysRemaining!==undefined && row.supply.daysRemaining<=14)
+    .sort((a,b)=>(a.supply!.daysRemaining??999)-(b.supply!.daysRemaining??999))
+
   app!.innerHTML=`
     <main class="app-shell">
       <header>
@@ -440,6 +497,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         <button class="ghost" id="open-cycles">Cycles</button>
         <button class="ghost" id="open-reminders">Reminders</button>
         <button class="ghost" id="open-inventory">Inventory${inventoryAlerts.length?` · ${inventoryAlerts.length}`:''}</button>
+        <button class="ghost" id="open-settings">Settings & Data</button>
         <button class="ghost" id="toggle-archive">${showArchived?'View active':'Archived substances'}</button>
       </section>
 
@@ -477,6 +535,26 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         <article><span>7-DAY ADHERENCE</span><strong>${adherence7d===null?'—':adherence7d+'%'}</strong><small>${completedExpected}/${expectedCount} expected doses completed</small></article>
         <article><span>LOW STOCK / EXPIRED</span><strong class="${inventoryAlerts.length?'inventory-alert-count':'online'}">${inventoryAlerts.length||'● Clear'}</strong><small>${inventoryAlerts.length?'Review inventory':'Inventory looks good'}</small></article>
       </section>
+
+      ${!showArchived?`
+      <section class="panel beta-analytics">
+        <div class="panel-head">
+          <div><span class="kicker">BETA SNAPSHOT</span><h3>Last 7 days</h3></div>
+          <span class="beta-badge">v0.9 BETA</span>
+        </div>
+        <div class="adherence-trend">
+          ${adherenceTrend.map(day=>`<div class="trend-day">
+            <div class="trend-track"><span style="height:${day.percent===null?4:Math.max(4,day.percent)}%"></span></div>
+            <b>${day.percent===null?'—':day.percent+'%'}</b>
+            <small>${esc(day.label)}</small>
+          </div>`).join('')}
+        </div>
+        <div class="beta-attention-grid">
+          <div><span>NEXT ACTION</span><strong>${overdueNow.length?overdueNow.length+' overdue':dueSoon.length?dueSoon.length+' due soon':dueToday.filter(x=>!x.status).length?dueToday.filter(x=>!x.status).length+' remaining today':'Caught up'}</strong></div>
+          <div><span>SUPPLY WATCH</span><strong>${runwayWarnings.length?runwayWarnings.length+' under 14 days':'No short runway'}</strong></div>
+          <div><span>ACTIVE CYCLE</span><strong>${activeCycle?esc(activeCycle.name):'None'}</strong></div>
+        </div>
+      </section>`:''}
 
       ${!showArchived?`
       <section class="panel cycle-overview ${activeCycle?'':'cycle-empty'}">
@@ -561,6 +639,31 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           }).join('')}
         </div>`:`<p class="empty">No low-stock or expiration alerts.</p>`}
       </section>`:''}
+
+      <dialog id="settings-modal" class="settings-modal">
+        <section class="settings-shell">
+          <div class="panel-head">
+            <div><span class="kicker">SETTINGS & DATA</span><h3>PULSE Beta</h3><p class="muted">Account, data portability, install status, and beta information.</p></div>
+            <button class="ghost compact modal-close" type="button">Close</button>
+          </div>
+          <div class="settings-grid">
+            <article class="settings-card"><span>VERSION</span><strong>0.9.0 Beta</strong><small>Private beta candidate</small></article>
+            <article class="settings-card"><span>ACCOUNT</span><strong>${esc(email)}</strong><small>Your PULSE data is scoped to your signed-in account.</small></article>
+            <article class="settings-card"><span>NOTIFICATIONS</span><strong id="settings-push-status">Checking…</strong><small>Dose, overdue, and inventory reminders.</small></article>
+          </div>
+          <div class="settings-actions">
+            <button class="primary" id="settings-export" type="button">Export my PULSE data</button>
+            <button class="ghost" id="settings-reset-password" type="button">Send password reset email</button>
+            <button class="ghost" id="settings-install" type="button">Install / Add PULSE to Home Screen</button>
+            <button class="ghost danger" id="settings-delete-data" type="button">Delete all tracking data</button>
+          </div>
+          <section class="beta-disclosure">
+            <span class="kicker">BETA NOTICE</span>
+            <p>PULSE is a personal tracking and reminder tool. It records information you enter and summarizes schedules, adherence, cycles, and inventory. It does not prescribe, recommend, or determine dosing or medical treatment.</p>
+            <p class="muted">During beta, verify important schedule and inventory information independently and report unexpected behavior before relying on it.</p>
+          </section>
+        </section>
+      </dialog>
 
       <dialog id="substance-detail-modal" class="substance-detail-modal">
         <section class="substance-detail-shell">
@@ -736,6 +839,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           </div>
           <div class="history-summary" id="history-summary"></div>
           <div class="history-list" id="history-list"><p class="empty">Loading history…</p></div>
+          <button class="ghost history-load-more" id="history-load-more" type="button" hidden>Load older activity</button>
         </section>
       </dialog>
 
@@ -800,6 +904,98 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   document.querySelector('#signout')!.addEventListener('click',async()=>{await supabase.auth.signOut();renderAuth()})
   document.querySelector('#toggle-archive')!.addEventListener('click',()=>renderDashboard(userId,email,!showArchived))
 
+  const fetchAllRows=async(table:string,select='*')=>{
+    const rows:any[]=[]
+    const pageSize=1000
+    for(let offset=0;;offset+=pageSize){
+      const {data,error}=await supabase.from(table).select(select).eq('user_id',userId).range(offset,offset+pageSize-1)
+      if(error) throw error
+      rows.push(...(data??[]))
+      if((data??[]).length<pageSize) break
+    }
+    return rows
+  }
+
+  const openSettings=async()=>{
+    const push=await hasBackgroundPush()
+    document.querySelector<HTMLElement>('#settings-push-status')!.textContent=push?'Background push enabled':'Not enabled on this device'
+    const installButton=document.querySelector<HTMLButtonElement>('#settings-install')!
+    const standalone=window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone===true
+    installButton.textContent=standalone?'PULSE is installed':'Install / Add PULSE to Home Screen'
+    installButton.disabled=standalone
+    settingsModal.showModal()
+  }
+  document.querySelector('#open-settings')!.addEventListener('click',openSettings)
+
+  document.querySelector('#settings-export')!.addEventListener('click',async()=>{
+    const button=document.querySelector<HTMLButtonElement>('#settings-export')!
+    button.disabled=true
+    button.textContent='Preparing export…'
+    try{
+      const [exportItems,exportSchedules,exportLogs,exportInventory,exportCycles,exportCycleItems,exportPrefs]=await Promise.all([
+        fetchAllRows('tracked_items'),fetchAllRows('schedules'),fetchAllRows('logs'),
+        fetchAllRows('inventory'),fetchAllRows('cycles'),fetchAllRows('cycle_items'),
+        fetchAllRows('notification_preferences')
+      ])
+      const payload={
+        exported_at:new Date().toISOString(),
+        version:'0.9.0-beta',
+        tracked_items:exportItems,
+        schedules:exportSchedules,
+        logs:exportLogs,
+        inventory:exportInventory,
+        cycles:exportCycles,
+        cycle_items:exportCycleItems,
+        notification_preferences:exportPrefs
+      }
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})
+      const url=URL.createObjectURL(blob)
+      const anchor=document.createElement('a')
+      anchor.href=url
+      anchor.download=`pulse-export-${dateKey(new Date())}.json`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      button.textContent='Export complete'
+    }catch(error:any){
+      button.disabled=false
+      button.textContent='Export my PULSE data'
+      alert(error?.message||'Unable to export PULSE data.')
+    }
+  })
+
+  document.querySelector('#settings-reset-password')!.addEventListener('click',async()=>{
+    const redirectTo=new URL(import.meta.env.BASE_URL,window.location.origin).toString()
+    const {error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo})
+    if(error) return alert(error.message)
+    alert('Password reset email sent.')
+  })
+
+  document.querySelector('#settings-install')!.addEventListener('click',async()=>{
+    if(deferredInstallPrompt){
+      await deferredInstallPrompt.prompt()
+      deferredInstallPrompt=null
+      return
+    }
+    const isiOS=/iphone|ipad|ipod/i.test(navigator.userAgent)
+    alert(isiOS?'On iPhone/iPad: open PULSE in Safari, tap Share, then choose Add to Home Screen.':'Use your browser menu and choose Install app or Add to Home screen.')
+  })
+
+  document.querySelector('#settings-delete-data')!.addEventListener('click',async()=>{
+    const confirmation=prompt('This permanently deletes your PULSE tracking data but keeps your account. Type DELETE to continue.')
+    if(confirmation!=='DELETE') return
+    const tables=['push_subscriptions','push_delivery_log','cycle_items','cycles','logs','schedules','inventory','tracked_items','notification_preferences']
+    for(const table of tables){
+      const {error}=await supabase.from(table).delete().eq('user_id',userId)
+      if(error) return alert(`Could not delete ${table}: ${error.message}`)
+    }
+    settingsModal.close()
+    await renderDashboard(userId,email,false)
+    alert('Your PULSE tracking data was deleted. Your login account remains active.')
+  })
+
+  const settingsModal=document.querySelector<HTMLDialogElement>('#settings-modal')!
   const substanceDetailModal=document.querySelector<HTMLDialogElement>('#substance-detail-modal')!
   const reminderModal=document.querySelector<HTMLDialogElement>('#reminder-modal')!
   const cycleModal=document.querySelector<HTMLDialogElement>('#cycle-modal')!
@@ -812,6 +1008,9 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const inventoryModal=document.querySelector<HTMLDialogElement>('#inventory-modal')!
   const inventoryEditModal=document.querySelector<HTMLDialogElement>('#inventory-edit-modal')!
   let historyLogs:Log[]=[]
+  let historyOffset=0
+  let historyHasMore=true
+  const historyPageSize=100
   document.querySelectorAll<HTMLButtonElement>('.modal-close').forEach(btn=>btn.addEventListener('click',()=>{ const dialog=btn.closest('dialog') as HTMLDialogElement|null; dialog?.close() }))
 
   const openItem=(item?:Item)=>{
@@ -1234,7 +1433,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       if(f.to && d>f.to) return false
       return true
     })
-    document.querySelector<HTMLElement>('#history-summary')!.textContent=`${filtered.length} of ${historyLogs.length} logs`
+    document.querySelector<HTMLElement>('#history-summary')!.textContent=`${filtered.length} matching · ${historyLogs.length} loaded${historyHasMore?' · more available':''}`
     document.querySelector<HTMLElement>('#history-list')!.innerHTML=filtered.length?filtered.map(log=>`
       <article class="history-entry">
         <div class="history-entry-main">
@@ -1259,16 +1458,32 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     }))
   }
 
-  const refreshHistory=async()=>{
-    document.querySelector<HTMLElement>('#history-list')!.innerHTML='<p class="empty">Loading history…</p>'
+  const loadHistoryPage=async(reset=false)=>{
+    const list=document.querySelector<HTMLElement>('#history-list')!
+    const loadMore=document.querySelector<HTMLButtonElement>('#history-load-more')!
+    if(reset){
+      historyOffset=0
+      historyHasMore=true
+      historyLogs=[]
+      list.innerHTML='<p class="empty">Loading history…</p>'
+    }
+    if(!historyHasMore) return
+    loadMore.disabled=true
     const {data,error}=await supabase.from('logs')
       .select('id,tracked_item_id,logged_at,amount,unit,status,route,injection_site,notes,schedule_id,scheduled_for,tracked_items(name,category,form)')
-      .eq('user_id',userId).order('logged_at',{ascending:false}).limit(1000)
+      .eq('user_id',userId).order('logged_at',{ascending:false})
+      .range(historyOffset,historyOffset+historyPageSize-1)
     if(error){
-      document.querySelector<HTMLElement>('#history-list')!.innerHTML=`<div class="notice">${esc(error.message)}</div>`
+      list.innerHTML=`<div class="notice">${esc(error.message)}</div>`
+      loadMore.disabled=false
       return
     }
-    historyLogs=(data??[]) as unknown as Log[]
+    const page=(data??[]) as unknown as Log[]
+    historyLogs.push(...page)
+    historyOffset+=page.length
+    historyHasMore=page.length===historyPageSize
+    loadMore.hidden=!historyHasMore
+    loadMore.disabled=false
     const sites=[...new Set(historyLogs.map(l=>l.injection_site).filter((v):v is string=>!!v))].sort()
     const siteSelect=document.querySelector<HTMLSelectElement>('#history-site')!
     const selected=siteSelect.value
@@ -1277,6 +1492,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     renderHistoryRows()
   }
 
+  const refreshHistory=()=>loadHistoryPage(true)
+
   const openHistory=async()=>{
     document.querySelector<HTMLSelectElement>('#history-item')!.innerHTML='<option value="">All items</option>'+allItemList.map(i=>`<option value="${i.id}">${esc(i.name)}</option>`).join('')
     historyModal.showModal()
@@ -1284,6 +1501,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   }
 
   document.querySelector('#open-history')!.addEventListener('click',openHistory)
+  document.querySelector('#history-load-more')!.addEventListener('click',()=>loadHistoryPage(false))
   document.querySelectorAll<HTMLInputElement|HTMLSelectElement>('#history-search,#history-item,#history-category,#history-status,#history-site,#history-from,#history-to').forEach(el=>el.addEventListener(el.id==='history-search'?'input':'change',renderHistoryRows))
   document.querySelector('#history-clear')!.addEventListener('click',()=>{
     ;['history-search','history-item','history-category','history-status','history-site','history-from','history-to'].forEach(id=>{
@@ -1470,10 +1688,10 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     if(!logId && status==='completed'){
       const stock=inventoryByItem.get(tracked_item_id)
       if(stock?.auto_decrement && stock.decrement_amount && Number(stock.decrement_amount)>0){
-        const nextQuantity=Math.max(0,Number(stock.quantity)-Number(stock.decrement_amount))
-        const {error:inventoryDeductError}=await supabase.from('inventory')
-          .update({quantity:nextQuantity,updated_at:new Date().toISOString()})
-          .eq('id',stock.id).eq('user_id',userId)
+        const {error:inventoryDeductError}=await supabase.rpc('decrement_inventory',{
+          p_inventory_id:stock.id,
+          p_amount:Number(stock.decrement_amount)
+        })
         if(inventoryDeductError) return alert('Log saved, but inventory could not be updated: '+inventoryDeductError.message)
       }
     }
@@ -1531,5 +1749,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   }))
 }
 
-supabase.auth.onAuthStateChange((_event,session)=>{ if(!session) renderAuth() })
+supabase.auth.onAuthStateChange((event,session)=>{
+  if(event==='PASSWORD_RECOVERY') return renderPasswordReset()
+  if(!session) renderAuth()
+})
 boot()
