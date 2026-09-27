@@ -11,7 +11,7 @@ export default defineConfig({
       workbox: {
         importScripts: ['push-sw.js']
       },
-      includeAssets: ['brand/science-by-hugs.svg', 'brand/sbh-monogram.svg', 'brand/pulse.svg'],
+      includeAssets: ['brand/science-by-hugs.svg', 'brand/sbh-monogram.svg', 'brand/pulse.svg', 'brand/pulse-app-icon.svg'],
       manifest: {
         name: 'Science By HUGs Pulse',
         short_name: 'Pulse',
@@ -23,7 +23,7 @@ export default defineConfig({
         scope: base,
         icons: [
           {
-            src: base + 'brand/sbh-monogram.svg',
+            src: base + 'brand/pulse-app-icon.svg',
             sizes: 'any',
             type: 'image/svg+xml',
             purpose: 'any maskable'
