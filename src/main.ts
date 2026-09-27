@@ -26,6 +26,10 @@ type Cycle = {
   id:string; name:string; start_date:string; end_date:string|null; status:'planned'|'active'|'completed'|'paused'; notes:string|null
 }
 type CycleItem = { id:string; cycle_id:string; tracked_item_id:string }
+type NotificationPrefs = {
+  user_id:string; dose_reminders_enabled:boolean; reminder_lead_minutes:number;
+  overdue_reminders_enabled:boolean; low_stock_notifications_enabled:boolean
+}
 
 type Inventory = {
   id:string; tracked_item_id:string; quantity:number; unit:string; low_threshold:number|null;
@@ -162,7 +166,7 @@ function categoryFields(item:Item){
 
 async function renderDashboard(userId:string,email:string,showArchived=false,jwtRetry=0) {
   const today=new Date()
-  const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError},{data:inventory,error:inventoryError},{data:cycles,error:cycleError},{data:cycleItems,error:cycleItemError},{data:cycleLogs,error:cycleLogError}] = await Promise.all([
+  const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError},{data:inventory,error:inventoryError},{data:cycles,error:cycleError},{data:cycleItems,error:cycleItemError},{data:cycleLogs,error:cycleLogError},{data:notificationPrefs,error:notificationPrefsError}] = await Promise.all([
     supabase.from('tracked_items')
       .select('id,name,category,form,default_amount,default_unit,route,notes,active')
       .eq('user_id',userId).eq('active',!showArchived).order('created_at',{ascending:false}),
@@ -189,11 +193,14 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       .select('id,cycle_id,tracked_item_id')
       .eq('user_id',userId),
     supabase.from('logs')
-      .select('tracked_item_id,logged_at,status')
-      .eq('user_id',userId).order('logged_at',{ascending:false}).limit(1000)
+      .select('tracked_item_id,logged_at,status,schedule_id,scheduled_for')
+      .eq('user_id',userId).order('logged_at',{ascending:false}).limit(1000),
+    supabase.from('notification_preferences')
+      .select('user_id,dose_reminders_enabled,reminder_lead_minutes,overdue_reminders_enabled,low_stock_notifications_enabled')
+      .eq('user_id',userId).maybeSingle()
   ])
-  if(itemError || allItemError || logError || scheduleError || todayLogError || inventoryError || cycleError || cycleItemError || cycleLogError) {
-    const problem=itemError?.message??allItemError?.message??logError?.message??scheduleError?.message??todayLogError?.message??inventoryError?.message??cycleError?.message??cycleItemError?.message??cycleLogError?.message
+  if(itemError || allItemError || logError || scheduleError || todayLogError || inventoryError || cycleError || cycleItemError || cycleLogError || notificationPrefsError) {
+    const problem=itemError?.message??allItemError?.message??logError?.message??scheduleError?.message??todayLogError?.message??inventoryError?.message??cycleError?.message??cycleItemError?.message??cycleLogError?.message??notificationPrefsError?.message
     if(jwtRetry<1 && problem?.toLowerCase().includes('jwt issued at future')){
       await new Promise(resolve=>setTimeout(resolve,1500))
       return renderDashboard(userId,email,showArchived,jwtRetry+1)
@@ -209,7 +216,11 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const inventoryList=(inventory??[]) as unknown as Inventory[]
   const cycleList=(cycles??[]) as Cycle[]
   const cycleItemList=(cycleItems??[]) as CycleItem[]
-  const cycleLogList=(cycleLogs??[]) as {tracked_item_id:string;logged_at:string;status:string}[]
+  const cycleLogList=(cycleLogs??[]) as {tracked_item_id:string;logged_at:string;status:string;schedule_id:string|null;scheduled_for:string|null}[]
+  const reminderPrefs=(notificationPrefs??{
+    user_id:userId,dose_reminders_enabled:true,reminder_lead_minutes:30,
+    overdue_reminders_enabled:true,low_stock_notifications_enabled:true
+  }) as NotificationPrefs
   const inventoryByItem=new Map(inventoryList.map(row=>[row.tracked_item_id,row]))
   const todayKey=dateKey(today)
   const lowInventory=inventoryList.filter(row=>row.low_threshold!==null && Number(row.quantity)<=Number(row.low_threshold))
@@ -267,6 +278,30 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     return Math.round(elapsed/total*100)
   })()
 
+  const adherenceWindowDays=7
+  const adherenceStart=startOfDay(new Date(today.getFullYear(),today.getMonth(),today.getDate()-(adherenceWindowDays-1)))
+  const expectedOccurrences:{schedule:Schedule;when:Date;status:string|null}[]=[]
+  for(const schedule of scheduleList){
+    for(let offset=0;offset<adherenceWindowDays;offset++){
+      const d=new Date(adherenceStart.getFullYear(),adherenceStart.getMonth(),adherenceStart.getDate()+offset)
+      if(!scheduleDueOn(schedule,d)) continue
+      const when=occurrenceDate(schedule,d)
+      if(when.getTime()>Date.now()) continue
+      const matching=cycleLogList.find(log=>
+        log.schedule_id===schedule.id &&
+        !!log.scheduled_for &&
+        dateKey(new Date(log.scheduled_for))===dateKey(when)
+      )
+      expectedOccurrences.push({schedule,when,status:matching?.status??null})
+    }
+  }
+  const expectedCount=expectedOccurrences.length
+  const completedExpected=expectedOccurrences.filter(x=>x.status==='completed').length
+  const missedExpected=expectedOccurrences.filter(x=>!x.status || x.status==='skipped').length
+  const adherence7d=expectedCount?Math.round(completedExpected/expectedCount*100):null
+  const dueSoon=dueToday.filter(x=>!x.status && x.schedule.scheduled_time && x.when.getTime()>=Date.now() && x.when.getTime()-Date.now()<=reminderPrefs.reminder_lead_minutes*60000)
+  const overdueNow=dueToday.filter(x=>x.overdue)
+
   app!.innerHTML=`
     <main class="app-shell">
       <header>
@@ -280,6 +315,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         <button class="primary" id="quick-log" ${itemList.length && !showArchived?'':'disabled'}>+ Log dose</button>
         <button class="ghost" id="add-item">+ Add substance</button>
         <button class="ghost" id="open-cycles">Cycles</button>
+        <button class="ghost" id="open-reminders">Reminders</button>
         <button class="ghost" id="open-inventory">Inventory${inventoryAlerts.length?` · ${inventoryAlerts.length}`:''}</button>
         <button class="ghost" id="toggle-archive">${showArchived?'View active':'Archived substances'}</button>
       </section>
@@ -293,7 +329,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         <div class="today-summary">
           <span><b>${completedToday}</b> complete</span>
           <span><b>${skippedToday}</b> skipped</span>
-          <span><b>${dueToday.filter(x=>x.overdue).length}</b> overdue</span>
+          <span><b>${dueSoon.length}</b> due soon</span>
+          <span><b>${overdueNow.length}</b> overdue</span>
         </div>
         <div class="rows today-rows">
           ${dueToday.length?dueToday.map(x=>`
@@ -312,10 +349,10 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         </div>
       </section>`:''}
 
-      <section class="stats v2-stats">
-        <article><span>DUE TODAY</span><strong>${dueToday.filter(x=>!x.status).length}</strong></article>
-        <article><span>ACTIVE SUBSTANCES</span><strong>${itemList.length}</strong></article>
-        <article><span>LOW STOCK / EXPIRED</span><strong class="${inventoryAlerts.length?'inventory-alert-count':'online'}">${inventoryAlerts.length||'● Clear'}</strong></article>
+      <section class="stats v2-stats adherence-stats">
+        <article><span>DUE TODAY</span><strong>${dueToday.filter(x=>!x.status).length}</strong><small>${dueSoon.length} due soon · ${overdueNow.length} overdue</small></article>
+        <article><span>7-DAY ADHERENCE</span><strong>${adherence7d===null?'—':adherence7d+'%'}</strong><small>${completedExpected}/${expectedCount} expected doses completed</small></article>
+        <article><span>LOW STOCK / EXPIRED</span><strong class="${inventoryAlerts.length?'inventory-alert-count':'online'}">${inventoryAlerts.length||'● Clear'}</strong><small>${inventoryAlerts.length?'Review inventory':'Inventory looks good'}</small></article>
       </section>
 
       ${!showArchived?`
@@ -397,6 +434,23 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           }).join('')}
         </div>`:`<p class="empty">No low-stock or expiration alerts.</p>`}
       </section>`:''}
+
+      <dialog id="reminder-modal">
+        <form id="reminder-form">
+          <div class="panel-head"><div><span class="kicker">REMINDERS</span><h3>Dose & inventory alerts</h3></div><button class="ghost compact modal-close" type="button">Close</button></div>
+          <p class="muted">PULSE can show browser notifications while the app is open. True background push while PULSE is closed will be added with the push-service layer.</p>
+          <label class="toggle-row"><input id="reminder-dose-enabled" type="checkbox"><span>Dose reminders</span></label>
+          <label>Remind me before a scheduled dose<select id="reminder-lead">
+            <option value="0">At scheduled time</option><option value="15">15 minutes before</option>
+            <option value="30">30 minutes before</option><option value="60">1 hour before</option>
+            <option value="120">2 hours before</option>
+          </select></label>
+          <label class="toggle-row"><input id="reminder-overdue-enabled" type="checkbox"><span>Overdue dose alerts</span></label>
+          <label class="toggle-row"><input id="reminder-low-stock-enabled" type="checkbox"><span>Low-stock / expired inventory alerts</span></label>
+          <button class="ghost" id="enable-browser-notifications" type="button">Enable browser notifications</button>
+          <button class="primary" type="submit">Save reminder settings</button>
+        </form>
+      </dialog>
 
       <dialog id="cycle-modal" class="cycle-modal">
         <section class="cycle-shell">
@@ -596,6 +650,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   document.querySelector('#signout')!.addEventListener('click',async()=>{await supabase.auth.signOut();renderAuth()})
   document.querySelector('#toggle-archive')!.addEventListener('click',()=>renderDashboard(userId,email,!showArchived))
 
+  const reminderModal=document.querySelector<HTMLDialogElement>('#reminder-modal')!
   const cycleModal=document.querySelector<HTMLDialogElement>('#cycle-modal')!
   const cycleEditModal=document.querySelector<HTMLDialogElement>('#cycle-edit-modal')!
   const itemModal=document.querySelector<HTMLDialogElement>('#item-modal')!
@@ -671,6 +726,69 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   }
 
   const openLog=(item:Item,schedule?:Schedule,existing?:Log)=>{ fillLog(item,schedule,existing); logModal.showModal() }
+
+  const showBrowserNotification=(key:string,title:string,body:string)=>{
+    if(!('Notification' in window) || Notification.permission!=='granted') return
+    if(sessionStorage.getItem(key)) return
+    sessionStorage.setItem(key,'1')
+    new Notification(title,{body,icon:pulseLogoUrl})
+  }
+
+  if(reminderPrefs.dose_reminders_enabled){
+    dueSoon.forEach(x=>showBrowserNotification(
+      'pulse-reminder-'+x.schedule.id+'-'+dateKey(today),
+      'PULSE · Dose due soon',
+      `${x.schedule.tracked_items?.name??'Scheduled dose'} is due ${x.schedule.scheduled_time?x.when.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'today'}.`
+    ))
+  }
+  if(reminderPrefs.overdue_reminders_enabled){
+    overdueNow.forEach(x=>showBrowserNotification(
+      'pulse-overdue-'+x.schedule.id+'-'+dateKey(today),
+      'PULSE · Dose overdue',
+      `${x.schedule.tracked_items?.name??'Scheduled dose'} is overdue.`
+    ))
+  }
+  if(reminderPrefs.low_stock_notifications_enabled && inventoryAlerts.length){
+    showBrowserNotification(
+      'pulse-inventory-alert-'+dateKey(today),
+      'PULSE · Inventory alert',
+      `${inventoryAlerts.length} item${inventoryAlerts.length===1?'':'s'} need inventory attention.`
+    )
+  }
+
+  const openReminders=()=>{
+    document.querySelector<HTMLInputElement>('#reminder-dose-enabled')!.checked=reminderPrefs.dose_reminders_enabled
+    document.querySelector<HTMLSelectElement>('#reminder-lead')!.value=String(reminderPrefs.reminder_lead_minutes)
+    document.querySelector<HTMLInputElement>('#reminder-overdue-enabled')!.checked=reminderPrefs.overdue_reminders_enabled
+    document.querySelector<HTMLInputElement>('#reminder-low-stock-enabled')!.checked=reminderPrefs.low_stock_notifications_enabled
+    const button=document.querySelector<HTMLButtonElement>('#enable-browser-notifications')!
+    button.textContent=!('Notification' in window)?'Browser notifications unavailable':Notification.permission==='granted'?'Browser notifications enabled':Notification.permission==='denied'?'Browser notifications blocked':'Enable browser notifications'
+    button.disabled=!('Notification' in window) || Notification.permission==='denied'
+    reminderModal.showModal()
+  }
+  document.querySelector('#open-reminders')!.addEventListener('click',openReminders)
+  document.querySelector('#enable-browser-notifications')!.addEventListener('click',async()=>{
+    if(!('Notification' in window)) return
+    const permission=await Notification.requestPermission()
+    const button=document.querySelector<HTMLButtonElement>('#enable-browser-notifications')!
+    button.textContent=permission==='granted'?'Browser notifications enabled':permission==='denied'?'Browser notifications blocked':'Enable browser notifications'
+    button.disabled=permission==='denied'
+  })
+  document.querySelector('#reminder-form')!.addEventListener('submit',async e=>{
+    e.preventDefault()
+    const payload={
+      user_id:userId,
+      dose_reminders_enabled:document.querySelector<HTMLInputElement>('#reminder-dose-enabled')!.checked,
+      reminder_lead_minutes:Number(document.querySelector<HTMLSelectElement>('#reminder-lead')!.value),
+      overdue_reminders_enabled:document.querySelector<HTMLInputElement>('#reminder-overdue-enabled')!.checked,
+      low_stock_notifications_enabled:document.querySelector<HTMLInputElement>('#reminder-low-stock-enabled')!.checked,
+      updated_at:new Date().toISOString()
+    }
+    const {error}=await supabase.from('notification_preferences').upsert(payload,{onConflict:'user_id'})
+    if(error) return alert(error.message)
+    reminderModal.close()
+    renderDashboard(userId,email,showArchived)
+  })
 
   const openCycleEditor=(cycle?:Cycle)=>{
     document.querySelector<HTMLInputElement>('#cycle-id')!.value=cycle?.id??''
