@@ -3,6 +3,7 @@ import './brand.css'
 import { supabase } from './supabase'
 
 const pulseLogoUrl = `${import.meta.env.BASE_URL}brand/pulse.svg`
+const pushFunctionUrl = 'https://pspiqukuhtazmkyfleii.supabase.co/functions/v1/pulse-push?action=config'
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('App root not found')
 let reminderTimer:number|undefined
@@ -126,6 +127,63 @@ function routeOptions(selected:string|null=''){
     ['topical','Topical']
   ]
   return '<option value="">Select route</option>'+options.map(([value,label])=>`<option value="${value}" ${selected===value?'selected':''}>${label}</option>`).join('')
+}
+
+function urlBase64ToUint8Array(base64String:string){
+  const padding='='.repeat((4-base64String.length%4)%4)
+  const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/')
+  const raw=window.atob(base64)
+  return Uint8Array.from([...raw].map(char=>char.charCodeAt(0)))
+}
+
+async function ensureBackgroundPush(userId:string){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('Background push is not supported in this browser.')
+  if(!('Notification' in window)) throw new Error('Notifications are not supported in this browser.')
+  const permission=Notification.permission==='granted'?'granted':await Notification.requestPermission()
+  if(permission!=='granted') throw new Error(permission==='denied'?'Notifications are blocked in your browser settings.':'Notification permission was not granted.')
+
+  const {data:{session}}=await supabase.auth.getSession()
+  if(!session) throw new Error('Your session expired. Sign in again.')
+
+  const response=await fetch(pushFunctionUrl,{
+    headers:{Authorization:`Bearer ${session.access_token}`}
+  })
+  const config=await response.json()
+  if(!response.ok || !config.publicKey) throw new Error(config.error||'Unable to load push configuration.')
+
+  const registration=await navigator.serviceWorker.ready
+  let subscription=await registration.pushManager.getSubscription()
+  if(!subscription){
+    subscription=await registration.pushManager.subscribe({
+      userVisibleOnly:true,
+      applicationServerKey:urlBase64ToUint8Array(config.publicKey)
+    })
+  }
+  const json=subscription.toJSON()
+  const p256dh=json.keys?.p256dh
+  const auth=json.keys?.auth
+  if(!p256dh || !auth) throw new Error('Push subscription keys are unavailable.')
+
+  const {error}=await supabase.from('push_subscriptions').upsert({
+    user_id:userId,
+    endpoint:subscription.endpoint,
+    p256dh,
+    auth,
+    user_agent:navigator.userAgent,
+    updated_at:new Date().toISOString()
+  },{onConflict:'user_id,endpoint'})
+  if(error) throw error
+  return subscription
+}
+
+async function hasBackgroundPush(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return false
+  try{
+    const registration=await navigator.serviceWorker.ready
+    return !!(await registration.pushManager.getSubscription())
+  }catch{
+    return false
+  }
 }
 
 function categoryFields(item:Item){
@@ -439,7 +497,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       <dialog id="reminder-modal">
         <form id="reminder-form">
           <div class="panel-head"><div><span class="kicker">REMINDERS</span><h3>Dose & inventory alerts</h3></div><button class="ghost compact modal-close" type="button">Close</button></div>
-          <p class="muted">PULSE can show browser notifications while the app is open. True background push while PULSE is closed will be added with the push-service layer.</p>
+          <p class="muted">Enable background push so PULSE can notify you about scheduled doses, overdue doses, and inventory alerts even when the app is closed. On iPhone/iPad, install PULSE to the Home Screen first.</p>
           <label class="toggle-row"><input id="reminder-dose-enabled" type="checkbox"><span>Dose reminders</span></label>
           <label>Remind me before a scheduled dose<select id="reminder-lead">
             <option value="0">At scheduled time</option><option value="15">15 minutes before</option>
@@ -765,23 +823,30 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   if(reminderTimer) window.clearInterval(reminderTimer)
   reminderTimer=window.setInterval(checkReminders,60000)
 
-  const openReminders=()=>{
+  const openReminders=async()=>{
     document.querySelector<HTMLInputElement>('#reminder-dose-enabled')!.checked=reminderPrefs.dose_reminders_enabled
     document.querySelector<HTMLSelectElement>('#reminder-lead')!.value=String(reminderPrefs.reminder_lead_minutes)
     document.querySelector<HTMLInputElement>('#reminder-overdue-enabled')!.checked=reminderPrefs.overdue_reminders_enabled
     document.querySelector<HTMLInputElement>('#reminder-low-stock-enabled')!.checked=reminderPrefs.low_stock_notifications_enabled
     const button=document.querySelector<HTMLButtonElement>('#enable-browser-notifications')!
-    button.textContent=!('Notification' in window)?'Browser notifications unavailable':Notification.permission==='granted'?'Browser notifications enabled':Notification.permission==='denied'?'Browser notifications blocked':'Enable browser notifications'
-    button.disabled=!('Notification' in window) || Notification.permission==='denied'
+    const subscribed=await hasBackgroundPush()
+    button.textContent=!('Notification' in window)?'Notifications unavailable':subscribed?'Background push enabled':Notification.permission==='denied'?'Notifications blocked':'Enable background push'
+    button.disabled=!('Notification' in window) || Notification.permission==='denied' || subscribed
     reminderModal.showModal()
   }
   document.querySelector('#open-reminders')!.addEventListener('click',openReminders)
   document.querySelector('#enable-browser-notifications')!.addEventListener('click',async()=>{
-    if(!('Notification' in window)) return
-    const permission=await Notification.requestPermission()
     const button=document.querySelector<HTMLButtonElement>('#enable-browser-notifications')!
-    button.textContent=permission==='granted'?'Browser notifications enabled':permission==='denied'?'Browser notifications blocked':'Enable browser notifications'
-    button.disabled=permission==='denied'
+    button.disabled=true
+    button.textContent='Enabling background push…'
+    try{
+      await ensureBackgroundPush(userId)
+      button.textContent='Background push enabled'
+    }catch(error:any){
+      button.disabled=false
+      button.textContent='Enable background push'
+      alert(error?.message||'Unable to enable background push.')
+    }
   })
   document.querySelector('#reminder-form')!.addEventListener('submit',async e=>{
     e.preventDefault()
