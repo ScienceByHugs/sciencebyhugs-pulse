@@ -7,6 +7,7 @@ const pushFunctionUrl = 'https://pspiqukuhtazmkyfleii.supabase.co/functions/v1/p
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('App root not found')
 let reminderTimer:number|undefined
+let dashboardView:'today'|'stack'|'cycles'|'inventory'|'history'='today'
 let deferredInstallPrompt:any=null
 window.addEventListener('beforeinstallprompt',(event:any)=>{
   event.preventDefault()
@@ -262,6 +263,8 @@ function categoryFields(item:Item){
 }
 
 async function renderDashboard(userId:string,email:string,showArchived=false,jwtRetry=0) {
+  const savedView=sessionStorage.getItem('pulse-dashboard-view')
+  if(savedView && ['today','stack','cycles','inventory','history'].includes(savedView)) dashboardView=savedView as typeof dashboardView
   const today=new Date()
   const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError},{data:inventory,error:inventoryError},{data:cycles,error:cycleError},{data:cycleItems,error:cycleItemError},{data:cycleLogs,error:cycleLogError},{data:notificationPrefs,error:notificationPrefsError}] = await Promise.all([
     supabase.from('tracked_items')
@@ -483,7 +486,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     .sort((a,b)=>(a.supply!.daysRemaining??999)-(b.supply!.daysRemaining??999))
 
   app!.innerHTML=`
-    <main class="app-shell">
+    <main class="app-shell" data-view="${dashboardView}">
       <header class="pulse-header">
         <div class="pulse-header-brand">
           <img class="pulse-brand-lockup" src="${pulseLogoUrl}" alt="Pulse — Science By Hugs">
@@ -492,7 +495,15 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         <button class="ghost compact" id="signout">Sign out</button>
       </header>
 
-      <section class="welcome pulse-hero">
+      <nav class="pulse-nav" aria-label="PULSE sections">
+        <button class="${dashboardView==='today'?'active':''}" data-view-nav="today"><span>Today</span></button>
+        <button class="${dashboardView==='stack'?'active':''}" data-view-nav="stack"><span>Stack</span></button>
+        <button class="${dashboardView==='cycles'?'active':''}" data-view-nav="cycles"><span>Cycles</span></button>
+        <button class="${dashboardView==='inventory'?'active':''}" data-view-nav="inventory"><span>Inventory</span></button>
+        <button class="${dashboardView==='history'?'active':''}" data-view-nav="history"><span>History</span></button>
+      </nav>
+
+      <section class="welcome pulse-hero view-section view-today">
         <div class="pulse-hero-copy">
           <span class="kicker">PERSONAL PROTOCOL TELEMETRY</span>
           <h2>Stay on schedule.</h2>
@@ -501,7 +512,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         <div class="pulse-hero-signal" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       </section>
 
-      <section class="quick-actions">
+      <section class="quick-actions view-section view-today">
         <button class="primary" id="quick-log" ${itemList.length && !showArchived?'':'disabled'}>+ Log dose</button>
         <button class="ghost" id="add-item">+ Add substance</button>
         <button class="ghost" id="open-cycles">Cycles</button>
@@ -512,7 +523,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       </section>
 
       ${!showArchived?`
-      <section class="today-panel panel">
+      <section class="today-panel panel view-section view-today">
         <div class="panel-head">
           <div><span class="kicker">TODAY</span><h3>${today.toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}</h3></div>
           <button class="ghost compact" id="add-schedule" ${itemList.length?'':'disabled'}>+ Schedule</button>
@@ -540,14 +551,14 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         </div>
       </section>`:''}
 
-      <section class="stats v2-stats adherence-stats">
+      <section class="stats v2-stats adherence-stats view-section view-today">
         <article class="metric-card metric-due"><span>DUE TODAY</span><strong>${dueToday.filter(x=>!x.status).length}</strong><small>${dueSoon.length} due soon · ${overdueNow.length} overdue</small></article>
         <article class="metric-card metric-adherence"><span>7-DAY ADHERENCE</span><strong>${adherence7d===null?'—':adherence7d+'%'}</strong><small>${completedExpected}/${expectedCount} expected doses completed</small></article>
         <article class="metric-card metric-inventory"><span>LOW STOCK / EXPIRED</span><strong class="${inventoryAlerts.length?'inventory-alert-count':'online'}">${inventoryAlerts.length||'● Clear'}</strong><small>${inventoryAlerts.length?'Review inventory':'Inventory looks good'}</small></article>
       </section>
 
       ${!showArchived?`
-      <section class="panel beta-analytics">
+      <section class="panel beta-analytics view-section view-today">
         <div class="panel-head">
           <div><span class="kicker">BETA SNAPSHOT</span><h3>Last 7 days</h3></div>
           <span class="beta-badge"><i></i> PRIVATE BETA · v0.9</span>
@@ -567,7 +578,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       </section>`:''}
 
       ${!showArchived?`
-      <section class="panel cycle-overview ${activeCycle?'':'cycle-empty'}">
+      <section class="panel cycle-overview view-section view-cycles ${activeCycle?'':'cycle-empty'}">
         <div class="panel-head">
           <div><span class="kicker">CURRENT CYCLE</span><h3>${activeCycle?esc(activeCycle.name):'No active cycle'}</h3></div>
           <div class="cycle-overview-actions">
@@ -584,10 +595,28 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           </div>
           ${cycleProgress!==null?`<div class="cycle-progress-track"><span style="width:${cycleProgress}%"></span></div>`:''}
         `:`<p class="empty">Create a cycle to group substances together and track progress over time.</p>`}
+      </section>
+      <section class="panel view-section view-cycles cycle-tab-list">
+        <div class="panel-head">
+          <div><span class="kicker">CYCLES</span><h3>All cycles</h3></div>
+          <button class="primary compact" id="cycle-tab-create">+ New cycle</button>
+        </div>
+        <div class="cycle-list">
+          ${cycleList.length?cycleList.map(cycle=>{
+            const count=cycleItemList.filter(ci=>ci.cycle_id===cycle.id).length
+            return `<article class="cycle-card ${cycle.status==='active'?'active':''}">
+              <div><b>${esc(cycle.name)}</b><small>${esc(titleCase(cycle.status))} · ${esc(cycle.start_date)}${cycle.end_date?' → '+esc(cycle.end_date):' → ongoing'} · ${count} substance${count===1?'':'s'}</small></div>
+              <div class="cycle-card-actions">
+                <button class="ghost compact" data-cycle-details="${cycle.id}">Details</button>
+                <button class="ghost compact" data-cycle-edit="${cycle.id}">Edit</button>
+              </div>
+            </article>`
+          }).join(''):'<p class="empty">No cycles yet.</p>'}
+        </div>
       </section>`:''}
 
-      <section class="layout">
-        <article class="panel">
+      <section class="layout view-layout">
+        <article class="panel view-section view-stack">
           <div class="panel-head"><div><span class="kicker">${showArchived?'ARCHIVE':'MY STACK'}</span><h3>${showArchived?'Archived substances':'Your substances'}</h3></div></div>
           <div class="rows">
             ${itemList.length?itemList.map(i=>`
@@ -606,7 +635,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           </div>
         </article>
 
-        <article class="panel">
+        <article class="panel view-section view-history">
           <div class="panel-head"><div><span class="kicker">HISTORY</span><h3>Recent activity</h3></div><button class="ghost compact" id="open-history">View all</button></div>
           <div class="rows">
             ${recent.length?recent.map(l=>`
@@ -621,7 +650,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       </section>
 
       ${!showArchived?`
-      <section class="panel schedules-panel">
+      <section class="panel schedules-panel view-section view-stack">
         <div class="panel-head"><div><span class="kicker">SCHEDULES</span><h3>Active schedules</h3></div><button class="ghost compact" id="add-schedule-secondary" ${itemList.length?'':'disabled'}>+ Add</button></div>
         <div class="rows">
           ${scheduleList.length?scheduleList.map(s=>`
@@ -633,7 +662,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       </section>`:''}
 
       ${!showArchived?`
-      <section class="panel inventory-preview">
+      <section class="panel inventory-preview view-section view-inventory">
         <div class="panel-head">
           <div><span class="kicker">INVENTORY</span><h3>Stock overview</h3></div>
           <button class="ghost compact" id="open-inventory-secondary">Manage inventory</button>
@@ -912,7 +941,12 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     </main>`
 
   document.querySelector('#signout')!.addEventListener('click',async()=>{await supabase.auth.signOut();renderAuth()})
-  document.querySelector('#toggle-archive')!.addEventListener('click',()=>renderDashboard(userId,email,!showArchived))
+  document.querySelectorAll<HTMLButtonElement>('[data-view-nav]').forEach(btn=>btn.addEventListener('click',()=>{
+    dashboardView=(btn.dataset.viewNav||'today') as typeof dashboardView
+    sessionStorage.setItem('pulse-dashboard-view',dashboardView)
+    renderDashboard(userId,email,showArchived)
+  }))
+  document.querySelector('#toggle-archive')!.addEventListener('click',()=>{dashboardView='stack';sessionStorage.setItem('pulse-dashboard-view','stack');renderDashboard(userId,email,!showArchived)})
 
   const fetchAllRows=async(table:string,select='*')=>{
     const rows:any[]=[]
@@ -1369,8 +1403,9 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   }
 
   const openCycles=()=>cycleModal.showModal()
-  document.querySelector('#open-cycles')!.addEventListener('click',openCycles)
+  document.querySelector('#open-cycles')!.addEventListener('click',()=>{dashboardView='cycles';sessionStorage.setItem('pulse-dashboard-view','cycles');renderDashboard(userId,email,showArchived)})
   document.querySelector('#open-cycles-secondary')?.addEventListener('click',openCycles)
+  document.querySelector('#cycle-tab-create')?.addEventListener('click',()=>openCycleEditor())
   document.querySelector('#active-cycle-details')?.addEventListener('click',()=>{ if(activeCycle) openCycleDetail(activeCycle) })
   document.querySelector('#cycle-add')!.addEventListener('click',()=>openCycleEditor())
   document.querySelectorAll<HTMLButtonElement>('[data-cycle-details]').forEach(btn=>btn.addEventListener('click',()=>{
@@ -1551,7 +1586,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   }
 
   const openInventory=()=>inventoryModal.showModal()
-  document.querySelector('#open-inventory')!.addEventListener('click',openInventory)
+  document.querySelector('#open-inventory')!.addEventListener('click',()=>{dashboardView='inventory';sessionStorage.setItem('pulse-dashboard-view','inventory');renderDashboard(userId,email,showArchived)})
   document.querySelector('#open-inventory-secondary')?.addEventListener('click',openInventory)
   document.querySelector('#inventory-add')!.addEventListener('click',()=>openInventoryEditor())
   document.querySelector('#inventory-auto')!.addEventListener('change',updateInventoryDecrementVisibility)
