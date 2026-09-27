@@ -233,3 +233,64 @@ body:before{
   .pulse-hero-signal span{animation:none}
   .row,.detail-card,.cycle-card,.inventory-card,.history-entry,.settings-card,.cycle-member-card{transition:none}
 }
+
+/* Compact section navigation */
+.pulse-nav{
+  display:grid;grid-template-columns:repeat(5,1fr);gap:6px;
+  position:sticky;top:0;z-index:20;
+  padding:9px;margin:12px 0 8px;
+  background:rgba(8,12,17,.88);
+  border:1px solid rgba(0,210,255,.13);
+  border-radius:16px;
+  backdrop-filter:blur(18px);
+  box-shadow:0 12px 36px rgba(0,0,0,.24)
+}
+.pulse-nav button{
+  min-height:42px;padding:9px 10px;border-radius:11px;
+  background:transparent;color:var(--muted);
+  border:1px solid transparent;font-weight:800;font-size:.78rem;
+  letter-spacing:.02em
+}
+.pulse-nav button:hover{color:var(--text);background:rgba(255,255,255,.025)}
+.pulse-nav button.active{
+  color:#031014;
+  background:linear-gradient(135deg,var(--sbh-cobalt),var(--sbh-cyan));
+  border-color:rgba(0,210,255,.28);
+  box-shadow:0 0 22px rgba(0,87,255,.16)
+}
+.view-section{display:none!important}
+.app-shell[data-view="today"] .view-today,
+.app-shell[data-view="stack"] .view-stack,
+.app-shell[data-view="cycles"] .view-cycles,
+.app-shell[data-view="inventory"] .view-inventory,
+.app-shell[data-view="history"] .view-history{display:block!important}
+.view-layout{display:contents}
+.app-shell[data-view="stack"] .view-layout,
+.app-shell[data-view="history"] .view-layout{display:grid}
+.app-shell[data-view="stack"] .view-layout{grid-template-columns:1fr}
+.app-shell[data-view="history"] .view-layout{grid-template-columns:1fr}
+.cycle-tab-list{margin-bottom:12px}
+.app-shell[data-view="cycles"] .cycle-overview{margin-top:22px}
+.app-shell[data-view="inventory"] .inventory-preview{margin-top:22px}
+.app-shell[data-view="history"] .view-history{margin-top:22px}
+.app-shell[data-view="stack"] .view-stack:first-child{margin-top:22px}
+.app-shell[data-view="today"] .pulse-hero{display:flex!important}
+.app-shell:not([data-view="today"]) .pulse-header{margin-bottom:8px}
+.app-shell:not([data-view="today"]) .pulse-nav{margin-bottom:22px}
+
+@media(max-width:760px){
+  .app-shell{padding-bottom:108px}
+  .pulse-nav{
+    position:fixed;left:10px;right:10px;bottom:10px;top:auto;
+    margin:0;padding:7px;z-index:50;
+    border-radius:18px;
+    box-shadow:0 18px 50px rgba(0,0,0,.52),0 0 0 1px rgba(0,210,255,.06)
+  }
+  .pulse-nav button{min-height:48px;padding:8px 4px;font-size:.7rem}
+  .pulse-header{padding-bottom:14px}
+  .app-shell:not([data-view="today"]) .pulse-nav{margin-bottom:0}
+  .app-shell[data-view="cycles"] .cycle-overview,
+  .app-shell[data-view="inventory"] .inventory-preview,
+  .app-shell[data-view="history"] .view-history,
+  .app-shell[data-view="stack"] .view-stack:first-child{margin-top:12px}
+}
