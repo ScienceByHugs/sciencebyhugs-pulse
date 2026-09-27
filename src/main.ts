@@ -482,7 +482,10 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       <section class="panel cycle-overview ${activeCycle?'':'cycle-empty'}">
         <div class="panel-head">
           <div><span class="kicker">CURRENT CYCLE</span><h3>${activeCycle?esc(activeCycle.name):'No active cycle'}</h3></div>
-          <button class="ghost compact" id="open-cycles-secondary">${activeCycle?'Manage cycle':'Create cycle'}</button>
+          <div class="cycle-overview-actions">
+            ${activeCycle?`<button class="ghost compact" id="active-cycle-details">View details</button>`:''}
+            <button class="ghost compact" id="open-cycles-secondary">${activeCycle?'Manage cycles':'Create cycle'}</button>
+          </div>
         </div>
         ${activeCycle?`
           <div class="cycle-metrics">
@@ -598,10 +601,23 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
               const members=cycleItemList.filter(ci=>ci.cycle_id===cycle.id)
               return `<article class="cycle-card ${cycle.status==='active'?'active':''}">
                 <div><b>${esc(cycle.name)}</b><small>${esc(titleCase(cycle.status))} · ${esc(cycle.start_date)}${cycle.end_date?' → '+esc(cycle.end_date):' → ongoing'} · ${members.length} substance${members.length===1?'':'s'}</small></div>
-                <button class="ghost compact" data-cycle-edit="${cycle.id}">Edit</button>
+                <div class="cycle-card-actions">
+                  <button class="ghost compact" data-cycle-details="${cycle.id}">Details</button>
+                  <button class="ghost compact" data-cycle-edit="${cycle.id}">Edit</button>
+                </div>
               </article>`
             }).join(''):'<p class="empty">No cycles yet.</p>'}
           </div>
+        </section>
+      </dialog>
+
+      <dialog id="cycle-detail-modal" class="cycle-detail-modal">
+        <section class="cycle-detail-shell">
+          <div class="panel-head">
+            <div><span class="kicker">CYCLE PROGRESS</span><h3 id="cycle-detail-title">Cycle</h3></div>
+            <button class="ghost compact modal-close" type="button">Close</button>
+          </div>
+          <div id="cycle-detail-body"><p class="empty">Loading…</p></div>
         </section>
       </dialog>
 
@@ -787,6 +803,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const substanceDetailModal=document.querySelector<HTMLDialogElement>('#substance-detail-modal')!
   const reminderModal=document.querySelector<HTMLDialogElement>('#reminder-modal')!
   const cycleModal=document.querySelector<HTMLDialogElement>('#cycle-modal')!
+  const cycleDetailModal=document.querySelector<HTMLDialogElement>('#cycle-detail-modal')!
   const cycleEditModal=document.querySelector<HTMLDialogElement>('#cycle-edit-modal')!
   const itemModal=document.querySelector<HTMLDialogElement>('#item-modal')!
   const scheduleModal=document.querySelector<HTMLDialogElement>('#schedule-modal')!
@@ -1037,6 +1054,97 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     renderDashboard(userId,email,showArchived)
   })
 
+  const openCycleDetail=(cycle:Cycle)=>{
+    document.querySelector<HTMLElement>('#cycle-detail-title')!.textContent=cycle.name
+    const body=document.querySelector<HTMLElement>('#cycle-detail-body')!
+    const memberIds=cycleItemList.filter(ci=>ci.cycle_id===cycle.id).map(ci=>ci.tracked_item_id)
+    const members=memberIds.map(id=>allItemList.find(i=>i.id===id)).filter((i):i is Item=>!!i)
+    const start=new Date(cycle.start_date+'T00:00:00')
+    const end=cycle.end_date?new Date(cycle.end_date+'T23:59:59'):null
+    const now=today
+    const elapsedDays=Math.max(0,Math.floor((startOfDay(now).getTime()-startOfDay(start).getTime())/86400000)+1)
+    const totalDays=end?Math.max(1,Math.floor((startOfDay(end).getTime()-startOfDay(start).getTime())/86400000)+1):null
+    const daysRemaining=end?Math.max(0,Math.ceil((startOfDay(end).getTime()-startOfDay(now).getTime())/86400000)):null
+    const progress=totalDays?Math.min(100,Math.max(0,Math.round(elapsedDays/totalDays*100))):null
+
+    let expected=0
+    let completed=0
+    let skipped=0
+    let missed=0
+    const cycleEndForCalc=end && end<now?end:now
+    for(const schedule of scheduleList.filter(s=>memberIds.includes(s.tracked_item_id) && s.active)){
+      const scheduleStart=new Date(schedule.start_date+'T00:00:00')
+      const from=startOfDay(scheduleStart>start?scheduleStart:start)
+      for(let d=new Date(from);d<=cycleEndForCalc;d=new Date(d.getFullYear(),d.getMonth(),d.getDate()+1)){
+        if(!scheduleDueOn(schedule,d)) continue
+        const when=occurrenceDate(schedule,d)
+        if(when>cycleEndForCalc) continue
+        expected++
+        const log=cycleLogList.find(l=>
+          l.schedule_id===schedule.id &&
+          !!l.scheduled_for &&
+          dateKey(new Date(l.scheduled_for))===dateKey(when)
+        )
+        if(log?.status==='completed') completed++
+        else if(log?.status==='skipped') skipped++
+        else missed++
+      }
+    }
+    const adherence=expected?Math.round(completed/expected*100):null
+
+    const memberCards=members.map(item=>{
+      const stock=inventoryByItem.get(item.id)
+      const weekly=weeklyPlanFor(item.id)
+      const next=nextDoseFor(item.id)
+      const itemLogs=cycleLogList.filter(l=>l.tracked_item_id===item.id && new Date(l.logged_at)>=start && (!end || new Date(l.logged_at)<=end))
+      const itemCompleted=itemLogs.filter(l=>l.status==='completed').length
+      const itemSkipped=itemLogs.filter(l=>l.status==='skipped').length
+      return `<article class="cycle-member-card">
+        <div class="cycle-member-main">
+          <div><b>${esc(item.name)}</b><small>${esc(item.category==='anabolic'?'Anabolic Steroid':titleCase(item.category))}${item.route?' · '+esc(titleCase(item.route)):''}</small></div>
+          <div class="cycle-member-meta">
+            <span>${item.default_amount??'—'} ${esc(item.default_unit??'')} / dose</span>
+            ${weekly?`<span>${weekly.exact?'':'≈ '}${Number(weekly.total.toFixed(2))} ${esc(weekly.unit)} / week</span>`:''}
+            ${stock?`<span>${esc(stock.quantity)} ${esc(stock.unit)} on hand</span>`:''}
+            <span>${itemCompleted} completed · ${itemSkipped} skipped</span>
+            ${next?`<span>Next ${esc(next.when.toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))}</span>`:''}
+          </div>
+        </div>
+        <button class="ghost compact" data-cycle-member-detail="${item.id}">Substance details</button>
+      </article>`
+    }).join('')
+
+    body.innerHTML=`
+      <div class="cycle-detail-actions">
+        <button class="primary compact" id="cycle-detail-edit">Edit cycle</button>
+      </div>
+      <div class="cycle-detail-stats">
+        <article><span>STATUS</span><strong>${esc(titleCase(cycle.status))}</strong><small>${esc(cycle.start_date)}${cycle.end_date?' → '+esc(cycle.end_date):' → ongoing'}</small></article>
+        <article><span>PROGRESS</span><strong>${progress===null?'Ongoing':progress+'%'}</strong><small>${totalDays===null?elapsedDays+' days elapsed':elapsedDays+' / '+totalDays+' days'}</small></article>
+        <article><span>DAYS REMAINING</span><strong>${daysRemaining===null?'—':daysRemaining}</strong><small>${cycle.end_date?'Through '+esc(cycle.end_date):'No end date set'}</small></article>
+        <article><span>ADHERENCE</span><strong>${adherence===null?'—':adherence+'%'}</strong><small>${completed}/${expected} expected doses completed</small></article>
+      </div>
+      ${progress!==null?`<div class="cycle-progress-track cycle-detail-progress"><span style="width:${progress}%"></span></div>`:''}
+      <div class="cycle-dose-summary">
+        <span><b>${expected}</b> expected</span>
+        <span><b>${completed}</b> completed</span>
+        <span><b>${skipped}</b> skipped</span>
+        <span><b>${missed}</b> missed</span>
+      </div>
+      <section class="detail-section">
+        <div class="panel-head"><div><span class="kicker">SUBSTANCES</span><h4>${members.length} in this cycle</h4></div></div>
+        <div class="cycle-member-list">${memberCards||'<p class="empty">No substances assigned to this cycle.</p>'}</div>
+      </section>
+      ${cycle.notes?`<section class="detail-section"><div class="panel-head"><div><span class="kicker">NOTES</span><h4>Cycle notes</h4></div></div><p class="cycle-notes">${esc(cycle.notes)}</p></section>`:''}
+    `
+
+    document.querySelector('#cycle-detail-edit')!.addEventListener('click',()=>{ cycleDetailModal.close(); openCycleEditor(cycle) })
+    document.querySelectorAll<HTMLButtonElement>('[data-cycle-member-detail]').forEach(btn=>btn.addEventListener('click',()=>{
+      const item=allItemList.find(i=>i.id===btn.dataset.cycleMemberDetail)
+      if(item){ cycleDetailModal.close(); cycleModal.close(); openSubstanceDetail(item) }
+    }))
+  }
+
   const openCycleEditor=(cycle?:Cycle)=>{
     document.querySelector<HTMLInputElement>('#cycle-id')!.value=cycle?.id??''
     document.querySelector<HTMLHeadingElement>('#cycle-title')!.textContent=cycle?'Edit cycle':'New cycle'
@@ -1054,7 +1162,12 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const openCycles=()=>cycleModal.showModal()
   document.querySelector('#open-cycles')!.addEventListener('click',openCycles)
   document.querySelector('#open-cycles-secondary')?.addEventListener('click',openCycles)
+  document.querySelector('#active-cycle-details')?.addEventListener('click',()=>{ if(activeCycle) openCycleDetail(activeCycle) })
   document.querySelector('#cycle-add')!.addEventListener('click',()=>openCycleEditor())
+  document.querySelectorAll<HTMLButtonElement>('[data-cycle-details]').forEach(btn=>btn.addEventListener('click',()=>{
+    const cycle=cycleList.find(c=>c.id===btn.dataset.cycleDetails)
+    if(cycle) openCycleDetail(cycle)
+  }))
   document.querySelectorAll<HTMLButtonElement>('[data-cycle-edit]').forEach(btn=>btn.addEventListener('click',()=>{
     const cycle=cycleList.find(c=>c.id===btn.dataset.cycleEdit)
     if(cycle) openCycleEditor(cycle)
