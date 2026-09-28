@@ -7,7 +7,7 @@ const pushFunctionUrl = 'https://pspiqukuhtazmkyfleii.supabase.co/functions/v1/p
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('App root not found')
 let reminderTimer:number|undefined
-let dashboardView:'today'|'stack'|'cycles'|'inventory'|'history'='today'
+let dashboardView:'today'|'stack'|'cycles'|'inventory'|'history'|'tools'='today'
 let deferredInstallPrompt:any=null
 window.addEventListener('beforeinstallprompt',(event:any)=>{
   event.preventDefault()
@@ -264,7 +264,7 @@ function categoryFields(item:Item){
 
 async function renderDashboard(userId:string,email:string,showArchived=false,jwtRetry=0) {
   const savedView=sessionStorage.getItem('pulse-dashboard-view')
-  if(savedView && ['today','stack','cycles','inventory','history'].includes(savedView)) dashboardView=savedView as typeof dashboardView
+  if(savedView && ['today','stack','cycles','inventory','history','tools'].includes(savedView)) dashboardView=savedView as typeof dashboardView
   const today=new Date()
   const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError},{data:inventory,error:inventoryError},{data:cycles,error:cycleError},{data:cycleItems,error:cycleItemError},{data:cycleLogs,error:cycleLogError},{data:notificationPrefs,error:notificationPrefsError}] = await Promise.all([
     supabase.from('tracked_items')
@@ -501,6 +501,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         <button class="${dashboardView==='cycles'?'active':''}" data-view-nav="cycles"><span>Cycles</span></button>
         <button class="${dashboardView==='inventory'?'active':''}" data-view-nav="inventory"><span>Inventory</span></button>
         <button class="${dashboardView==='history'?'active':''}" data-view-nav="history"><span>History</span></button>
+        <button class="${dashboardView==='tools'?'active':''}" data-view-nav="tools"><span>Tools</span></button>
       </nav>
 
       <section class="welcome pulse-hero view-section view-today">
@@ -692,6 +693,125 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           }).join(''):'<p class="empty">No inventory yet. Add stock for a substance to start supply tracking.</p>'}
         </div>
       </section>`:''}
+
+
+      <section class="panel view-section view-tools calculator-screen">
+        <div class="panel-head">
+          <div>
+            <span class="kicker">TOOLS</span>
+            <h3>Split Dose Calculator</h3>
+            <p class="muted compact-copy">Divide a user-entered weekly amount across a schedule and optionally convert it to volume or U-100 syringe units.</p>
+          </div>
+          <span class="calc-badge">ARITHMETIC ONLY</span>
+        </div>
+
+        <div class="calculator-layout">
+          <form id="split-dose-form" class="calculator-form">
+            <label>Tracked substance <span class="label-note">optional</span>
+              <select id="calc-item">
+                <option value="">Custom / not saved</option>
+                ${allItemList.map(item=>`<option value="${item.id}">${esc(item.name)}</option>`).join('')}
+              </select>
+            </label>
+
+            <div class="split">
+              <label>Total weekly amount
+                <input id="calc-weekly-dose" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 100" required>
+              </label>
+              <label>Amount unit
+                <select id="calc-dose-unit">
+                  <option value="mg">mg</option>
+                  <option value="mcg">mcg</option>
+                  <option value="IU">IU</option>
+                  <option value="mL">mL</option>
+                </select>
+              </label>
+            </div>
+
+            <fieldset class="calc-fieldset">
+              <legend>Split schedule</legend>
+              <div class="calc-mode-switch">
+                <label><input type="radio" name="calc-mode" value="times" checked><span>Times per week</span></label>
+                <label><input type="radio" name="calc-mode" value="interval"><span>Every X days</span></label>
+              </div>
+              <div id="calc-times-wrap">
+                <label>Times per week
+                  <input id="calc-times" type="number" inputmode="numeric" min="1" max="14" step="1" value="2">
+                </label>
+              </div>
+              <div id="calc-interval-wrap" hidden>
+                <label>Every how many days?
+                  <input id="calc-interval-days" type="number" inputmode="decimal" min="0.25" max="365" step="any" value="3">
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset class="calc-fieldset">
+              <legend>Volume calculation <span class="label-note">optional</span></legend>
+              <label>Concentration method
+                <select id="calc-concentration-mode">
+                  <option value="none">Do not calculate volume</option>
+                  <option value="direct">Known concentration</option>
+                  <option value="reconstituted">Vial + diluent</option>
+                </select>
+              </label>
+
+              <div id="calc-direct-fields" hidden>
+                <div class="split">
+                  <label>Amount per mL
+                    <input id="calc-concentration" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 200">
+                  </label>
+                  <label>Concentration unit
+                    <select id="calc-concentration-unit">
+                      <option value="mg">mg/mL</option>
+                      <option value="mcg">mcg/mL</option>
+                      <option value="IU">IU/mL</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div id="calc-reconstitution-fields" hidden>
+                <div class="split">
+                  <label>Vial amount
+                    <input id="calc-vial-amount" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 5">
+                  </label>
+                  <label>Vial unit
+                    <select id="calc-vial-unit">
+                      <option value="mg">mg</option>
+                      <option value="mcg">mcg</option>
+                      <option value="IU">IU</option>
+                    </select>
+                  </label>
+                </div>
+                <label>Diluent added (mL)
+                  <input id="calc-diluent" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 2">
+                </label>
+              </div>
+
+              <p id="calc-inventory-note" class="calc-inventory-note" hidden></p>
+            </fieldset>
+          </form>
+
+          <aside class="calculator-results" aria-live="polite">
+            <span class="kicker">RESULT</span>
+            <div class="calc-primary-result">
+              <small>Amount per dose</small>
+              <strong id="calc-dose-result">—</strong>
+            </div>
+            <div class="calc-result-grid">
+              <div><span>AVERAGE FREQUENCY</span><strong id="calc-frequency-result">—</strong></div>
+              <div><span>VOLUME PER DOSE</span><strong id="calc-volume-result">—</strong></div>
+              <div><span>U-100 SYRINGE</span><strong id="calc-units-result">—</strong></div>
+              <div><span>CONCENTRATION</span><strong id="calc-concentration-result">—</strong></div>
+            </div>
+            <div id="calc-validation" class="calc-validation">Enter a weekly amount to calculate.</div>
+            <div class="calc-disclaimer">
+              <b>Calculation tool only.</b> PULSE does not determine whether a dose, frequency, route, or concentration is appropriate. Use only values from your prescribed or otherwise established plan and independently verify important calculations.
+            </div>
+          </aside>
+        </div>
+      </section>
 
       <dialog id="settings-modal" class="settings-modal">
         <section class="settings-shell">
@@ -1065,6 +1185,176 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const historyModal=document.querySelector<HTMLDialogElement>('#history-modal')!
   const inventoryModal=document.querySelector<HTMLDialogElement>('#inventory-modal')!
   const inventoryEditModal=document.querySelector<HTMLDialogElement>('#inventory-edit-modal')!
+
+  const calcItem=document.querySelector<HTMLSelectElement>('#calc-item')
+  const calcWeekly=document.querySelector<HTMLInputElement>('#calc-weekly-dose')
+  const calcDoseUnit=document.querySelector<HTMLSelectElement>('#calc-dose-unit')
+  const calcTimes=document.querySelector<HTMLInputElement>('#calc-times')
+  const calcInterval=document.querySelector<HTMLInputElement>('#calc-interval-days')
+  const calcConcentrationMode=document.querySelector<HTMLSelectElement>('#calc-concentration-mode')
+  const calcConcentration=document.querySelector<HTMLInputElement>('#calc-concentration')
+  const calcConcentrationUnit=document.querySelector<HTMLSelectElement>('#calc-concentration-unit')
+  const calcVialAmount=document.querySelector<HTMLInputElement>('#calc-vial-amount')
+  const calcVialUnit=document.querySelector<HTMLSelectElement>('#calc-vial-unit')
+  const calcDiluent=document.querySelector<HTMLInputElement>('#calc-diluent')
+
+  const formatCalc=(value:number,digits=3)=>{
+    if(!Number.isFinite(value)) return '—'
+    return Number(value.toFixed(digits)).toString()
+  }
+
+  const updateCalculatorVisibility=()=>{
+    const scheduleMode=document.querySelector<HTMLInputElement>('input[name="calc-mode"]:checked')?.value??'times'
+    const timesWrap=document.querySelector<HTMLElement>('#calc-times-wrap')
+    const intervalWrap=document.querySelector<HTMLElement>('#calc-interval-wrap')
+    if(timesWrap) timesWrap.hidden=scheduleMode!=='times'
+    if(intervalWrap) intervalWrap.hidden=scheduleMode!=='interval'
+
+    const concentrationMode=calcConcentrationMode?.value??'none'
+    const direct=document.querySelector<HTMLElement>('#calc-direct-fields')
+    const recon=document.querySelector<HTMLElement>('#calc-reconstitution-fields')
+    if(direct) direct.hidden=concentrationMode!=='direct'
+    if(recon) recon.hidden=concentrationMode!=='reconstituted'
+  }
+
+  const runSplitDoseCalculator=()=>{
+    if(!calcWeekly || !calcDoseUnit) return
+    updateCalculatorVisibility()
+    const validation=document.querySelector<HTMLElement>('#calc-validation')!
+    const weekly=Number(calcWeekly.value)
+    const unit=calcDoseUnit.value
+    const mode=document.querySelector<HTMLInputElement>('input[name="calc-mode"]:checked')?.value??'times'
+
+    if(!(weekly>0)){
+      document.querySelector<HTMLElement>('#calc-dose-result')!.textContent='—'
+      document.querySelector<HTMLElement>('#calc-frequency-result')!.textContent='—'
+      document.querySelector<HTMLElement>('#calc-volume-result')!.textContent='—'
+      document.querySelector<HTMLElement>('#calc-units-result')!.textContent='—'
+      document.querySelector<HTMLElement>('#calc-concentration-result')!.textContent='—'
+      validation.textContent='Enter a weekly amount greater than zero.'
+      validation.classList.remove('valid')
+      return
+    }
+
+    let dosesPerWeek=0
+    let scheduleText=''
+    if(mode==='times'){
+      const times=Number(calcTimes?.value)
+      if(!(times>0)){
+        validation.textContent='Times per week must be greater than zero.'
+        validation.classList.remove('valid')
+        return
+      }
+      dosesPerWeek=times
+      scheduleText=`${formatCalc(times,2)}× / week`
+    }else{
+      const days=Number(calcInterval?.value)
+      if(!(days>0)){
+        validation.textContent='Day interval must be greater than zero.'
+        validation.classList.remove('valid')
+        return
+      }
+      dosesPerWeek=7/days
+      scheduleText=`every ${formatCalc(days,2)} day${days===1?'':'s'} · ≈ ${formatCalc(dosesPerWeek,2)}× / week`
+    }
+
+    const perDose=weekly/dosesPerWeek
+    document.querySelector<HTMLElement>('#calc-dose-result')!.textContent=`${formatCalc(perDose)} ${unit}`
+    document.querySelector<HTMLElement>('#calc-frequency-result')!.textContent=scheduleText
+
+    const concentrationMode=calcConcentrationMode?.value??'none'
+    let concentration:number|null=null
+    let concentrationUnit:string|null=null
+
+    if(concentrationMode==='direct'){
+      concentration=Number(calcConcentration?.value)
+      concentrationUnit=calcConcentrationUnit?.value??unit
+      if(!(concentration>0)){
+        document.querySelector<HTMLElement>('#calc-volume-result')!.textContent='—'
+        document.querySelector<HTMLElement>('#calc-units-result')!.textContent='—'
+        document.querySelector<HTMLElement>('#calc-concentration-result')!.textContent='Enter concentration'
+        validation.textContent='Split amount calculated. Enter a concentration greater than zero for volume.'
+        validation.classList.add('valid')
+        return
+      }
+    }else if(concentrationMode==='reconstituted'){
+      const vial=Number(calcVialAmount?.value)
+      const diluent=Number(calcDiluent?.value)
+      concentrationUnit=calcVialUnit?.value??unit
+      if(!(vial>0) || !(diluent>0)){
+        document.querySelector<HTMLElement>('#calc-volume-result')!.textContent='—'
+        document.querySelector<HTMLElement>('#calc-units-result')!.textContent='—'
+        document.querySelector<HTMLElement>('#calc-concentration-result')!.textContent='Enter vial + mL'
+        validation.textContent='Split amount calculated. Enter vial amount and diluent for volume.'
+        validation.classList.add('valid')
+        return
+      }
+      concentration=vial/diluent
+    }
+
+    if(concentrationMode==='none'){
+      document.querySelector<HTMLElement>('#calc-volume-result')!.textContent='—'
+      document.querySelector<HTMLElement>('#calc-units-result')!.textContent='—'
+      document.querySelector<HTMLElement>('#calc-concentration-result')!.textContent='Not used'
+      validation.textContent='Split amount calculated.'
+      validation.classList.add('valid')
+      return
+    }
+
+    if(concentrationUnit!==unit){
+      document.querySelector<HTMLElement>('#calc-volume-result')!.textContent='—'
+      document.querySelector<HTMLElement>('#calc-units-result')!.textContent='—'
+      document.querySelector<HTMLElement>('#calc-concentration-result')!.textContent=`${formatCalc(concentration!)} ${concentrationUnit}/mL`
+      validation.textContent=`Cannot convert ${unit} to ${concentrationUnit} automatically. Match the amount and concentration units.`
+      validation.classList.remove('valid')
+      return
+    }
+
+    const volume=perDose/concentration!
+    const syringeUnits=volume*100
+    document.querySelector<HTMLElement>('#calc-volume-result')!.textContent=`${formatCalc(volume,4)} mL`
+    document.querySelector<HTMLElement>('#calc-units-result')!.textContent=`${formatCalc(syringeUnits,2)} units`
+    document.querySelector<HTMLElement>('#calc-concentration-result')!.textContent=`${formatCalc(concentration!)} ${concentrationUnit}/mL`
+    validation.textContent='Calculation complete. U-100 assumes 100 syringe units = 1 mL.'
+    validation.classList.add('valid')
+  }
+
+  const loadCalculatorItem=()=>{
+    if(!calcItem) return
+    const item=allItemList.find(row=>row.id===calcItem.value)
+    const note=document.querySelector<HTMLElement>('#calc-inventory-note')
+    if(note){ note.hidden=true; note.textContent='' }
+    if(!item) return runSplitDoseCalculator()
+
+    if(item.default_unit && ['mg','mcg','IU','mL'].includes(item.default_unit) && calcDoseUnit){
+      calcDoseUnit.value=item.default_unit
+    }
+
+    const stock=inventoryByItem.get(item.id)
+    if(
+      stock && stock.strength_amount!==null && stock.strength_per_amount!==null &&
+      stock.strength_unit && stock.strength_per_unit?.toLowerCase()==='ml' &&
+      Number(stock.strength_per_amount)>0 &&
+      ['mg','mcg','IU'].includes(stock.strength_unit)
+    ){
+      const concentration=Number(stock.strength_amount)/Number(stock.strength_per_amount)
+      if(calcConcentrationMode) calcConcentrationMode.value='direct'
+      if(calcConcentration) calcConcentration.value=String(concentration)
+      if(calcConcentrationUnit) calcConcentrationUnit.value=stock.strength_unit
+      if(note){
+        note.hidden=false
+        note.textContent=`Loaded Inventory concentration: ${formatCalc(concentration)} ${stock.strength_unit}/mL.`
+      }
+    }
+    runSplitDoseCalculator()
+  }
+
+  document.querySelectorAll<HTMLInputElement|HTMLSelectElement>('#split-dose-form input,#split-dose-form select').forEach(control=>{
+    control.addEventListener(control.type==='radio'?'change':'input',runSplitDoseCalculator)
+    if(control.tagName==='SELECT') control.addEventListener('change',runSplitDoseCalculator)
+  })
+  calcItem?.addEventListener('change',loadCalculatorItem)
+
   let historyLogs:Log[]=[]
   let historyOffset=0
   let historyHasMore=true
