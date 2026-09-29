@@ -24,3 +24,24 @@ header{border-bottom-color:rgba(0,210,255,.18)}
 .ghost{border-color:rgba(0,210,255,.18)}
 .eyebrow,.kicker,.dose,.inventory-strength{color:var(--sbh-cyan)}
 .pulse-line{background:linear-gradient(90deg,transparent,var(--sbh-cobalt),var(--sbh-cyan),transparent);box-shadow:0 0 22px rgba(0,210,255,.45)}
+/* Blue Reactor v2 — PULSE */
+:root{
+  --pulse-teal:#21E6C1;
+  --pulse-violet:#8B6CFF;
+  --pulse-alert:var(--sbh-danger);
+  --pulse-tagline:"Track. Measure. Evolve.";
+  --secondary:var(--pulse-teal);
+  --accent:var(--pulse-violet);
+  --pulse:var(--pulse-alert); /* legacy semantic alert token */
+}
+.pulse-tagline,.brand-panel>p{
+  color:var(--pulse-teal);
+  font-family:var(--sbh-heading);
+  font-weight:700;
+  letter-spacing:.04em;
+}
+.pulse-line{
+  background:linear-gradient(90deg,transparent,var(--sbh-cobalt),var(--sbh-cyan),var(--pulse-violet),transparent);
+}
+.metric-inventory:before{background:var(--pulse-violet)}
+.metric-adherence strong,.beta-badge{color:var(--pulse-violet)}
