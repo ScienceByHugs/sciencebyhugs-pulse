@@ -13,9 +13,9 @@ export default defineConfig({
       },
       includeAssets: ['brand/science-by-hugs.svg', 'brand/sbh-monogram.svg', 'brand/pulse.svg', 'brand/pulse-app-icon.svg'],
       manifest: {
-        name: 'Science By HUGs Pulse',
+        name: 'PULSE — Science By Hugs',
         short_name: 'Pulse',
-        description: 'Biometric-inspired tracking PWA for schedules, routines, and personal logs.',
+        description: 'PULSE — Track. Measure. Evolve. Research tracking system by Science By Hugs.',
         theme_color: '#0A0A0B',
         background_color: '#0A0A0B',
         display: 'standalone',
