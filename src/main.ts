@@ -496,12 +496,24 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
       </header>
 
       <nav class="pulse-nav" aria-label="PULSE sections">
-        <button class="${dashboardView==='today'?'active':''}" data-view-nav="today"><span>Today</span></button>
-        <button class="${dashboardView==='stack'?'active':''}" data-view-nav="stack"><span>Stack</span></button>
-        <button class="${dashboardView==='cycles'?'active':''}" data-view-nav="cycles"><span>Cycles</span></button>
-        <button class="${dashboardView==='inventory'?'active':''}" data-view-nav="inventory"><span>Inventory</span></button>
-        <button class="${dashboardView==='history'?'active':''}" data-view-nav="history"><span>History</span></button>
-        <button class="${dashboardView==='tools'?'active':''}" data-view-nav="tools"><span>Tools</span></button>
+        <button class="${dashboardView==='today'?'active':''}" data-view-nav="today" aria-label="Today">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13h4l2-7 4 12 2-5h4"/></svg></span><span class="nav-label">Today</span>
+        </button>
+        <button class="${dashboardView==='stack'?'active':''}" data-view-nav="stack" aria-label="Stack">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4.5 7 12 11l7.5-4L12 3Z"/><path d="m4.5 12 7.5 4 7.5-4M4.5 17l7.5 4 7.5-4"/></svg></span><span class="nav-label">Stack</span>
+        </button>
+        <button class="${dashboardView==='cycles'?'active':''}" data-view-nav="cycles" aria-label="Cycles">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></span><span class="nav-label">Cycles</span>
+        </button>
+        <button class="${dashboardView==='inventory'?'active':''}" data-view-nav="inventory" aria-label="Inventory">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></span><span class="nav-label">Inventory</span>
+        </button>
+        <button class="${dashboardView==='history'?'active':''}" data-view-nav="history" aria-label="History">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6M12 7v5l3 2"/></svg></span><span class="nav-label">History</span>
+        </button>
+        <button class="${dashboardView==='tools'?'active':''}" data-view-nav="tools" aria-label="Tools">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m14.7 6.3 3-3 3 3-3 3"/><path d="m4 20 9.5-9.5"/><path d="M5 4h6v6H5z"/></svg></span><span class="nav-label">Tools</span>
+        </button>
       </nav>
 
       <section class="welcome pulse-hero view-section view-today">
