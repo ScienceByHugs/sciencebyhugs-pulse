@@ -604,30 +604,31 @@ input:focus,select:focus,textarea:focus{
   .app-shell{
     width:min(100% - 20px,1180px);
     padding-top:calc(10px + env(safe-area-inset-top, 0px));
-    padding-bottom:calc(118px + env(safe-area-inset-bottom, 0px))
+    padding-bottom:calc(96px + env(safe-area-inset-bottom, 0px))
   }
   .pulse-header{padding-top:6px}
   .pulse-brand-lockup{width:228px}
   .pulse-nav{
-    left:8px;right:8px;bottom:8px;
-    min-height:82px;
-    gap:4px;padding:7px 6px calc(7px + env(safe-area-inset-bottom));
-    border-radius:24px;
+    left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom, 0px));
+    grid-template-columns:repeat(6,minmax(0,1fr));
+    min-height:0;
+    gap:2px;padding:5px;
+    border-radius:20px;
     background:rgba(8,12,18,.91);
     border:1px solid rgba(255,255,255,.085);
     box-shadow:0 22px 54px rgba(0,0,0,.58),0 0 0 1px rgba(0,210,255,.025)
   }
   .pulse-nav button{
-    min-width:0;min-height:66px;
-    padding:7px 2px 6px;
-    border-radius:17px;
+    min-width:0;min-height:58px;
+    padding:6px 0;
+    border-radius:14px;
     flex-direction:column;
-    gap:5px;
-    font-size:.67rem;
+    gap:4px;
+    font-size:.65rem;
     letter-spacing:0
   }
   .pulse-nav button .nav-icon,
-  .pulse-nav button .nav-icon svg{width:25px;height:25px}
+  .pulse-nav button .nav-icon svg{width:23px;height:23px}
   .pulse-nav button.active{
     color:#7eeaff;
     background:linear-gradient(180deg,rgba(0,210,255,.13),rgba(0,87,255,.08));
