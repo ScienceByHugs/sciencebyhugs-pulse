@@ -1,36 +1,27 @@
 self.addEventListener('push', function (event) {
   var payload = {}
-  try {
-    payload = event.data ? event.data.json() : {}
-  } catch (_) {
-    payload = { body: event.data ? event.data.text() : '' }
-  }
-
-  event.waitUntil(
-    self.registration.showNotification(payload.title || 'PULSE', {
-      body: payload.body || 'You have a PULSE reminder.',
-      tag: payload.tag || 'pulse',
-      icon: './brand/sbh-monogram.svg',
-      badge: './brand/sbh-monogram.svg',
-      data: { url: payload.url || './' }
-    })
-  )
+  try { payload = event.data ? event.data.json() : {} } catch (_) {}
+  var base = self.registration.scope
+  var target = new URL(payload.url || './', base)
+  if (target.origin !== self.location.origin || !target.pathname.startsWith(new URL(base).pathname)) target = new URL(base)
+  event.waitUntil(self.registration.showNotification(payload.title || 'PULSE', {
+    body: payload.body || 'You have a new update.',
+    tag: payload.tag || 'pulse',
+    icon: new URL('brand/pulse-app-icon.svg', base).href,
+    data: { url: target.href },
+  }))
 })
 
 self.addEventListener('notificationclick', function (event) {
   event.notification.close()
-  var target = event.notification.data && event.notification.data.url
-    ? event.notification.data.url
-    : './'
-
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clients) {
-      if (clients.length) {
-        var client = clients[0]
-        if (client.navigate) client.navigate(target)
-        return client.focus()
-      }
-      return self.clients.openWindow ? self.clients.openWindow(target) : undefined
-    })
-  )
+  var target = new URL(event.notification.data?.url || './', self.registration.scope)
+  if (target.origin !== self.location.origin || !target.pathname.startsWith(new URL(self.registration.scope).pathname)) target = new URL(self.registration.scope)
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async function (clients) {
+    var client = clients.find(function (c) { return c.url.startsWith(self.registration.scope) })
+    if (client) {
+      if (client.navigate) await client.navigate(target.href)
+      return client.focus()
+    }
+    return self.clients.openWindow(target.href)
+  }))
 })
