@@ -1,5 +1,6 @@
 import { calculateReconstitution } from './reconstitution'
-import { pushPanel, bindPushPanel, pushEnabled, disablePush } from './push'
+import { bindPushPanel, pushEnabled, disablePush } from './push'
+import { accountScreen, bindAccount } from './account'
 import './styles.css'
 import './brand.css'
 import { doseInStockUnits, packageState, displayStock, stockNumber } from './inventory'
@@ -8,7 +9,7 @@ import { supabase } from './supabase'
 const pulseLogoUrl = `${import.meta.env.BASE_URL}brand/pulse.svg`
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('App root not found')
-let dashboardView:'today'|'stack'|'cycles'|'inventory'|'history'|'tools'='today'
+let dashboardView:'today'|'stack'|'cycles'|'inventory'|'history'|'tools'|'account'='today'
 let deferredInstallPrompt:any=null
 window.addEventListener('beforeinstallprompt',(event:any)=>{
   event.preventDefault()
@@ -89,7 +90,7 @@ const scheduleLabel=(s:Schedule)=>{
 
 async function boot() {
   const url=new URL(location.href),view=url.searchParams.get('view')
-  if(view && ['today','stack','cycles','inventory','history','tools'].includes(view)){sessionStorage.setItem('pulse-dashboard-view',view);url.searchParams.delete('view');history.replaceState(null,'',url)}
+  if(view && ['today','stack','cycles','inventory','history','tools','account'].includes(view)){sessionStorage.setItem('pulse-dashboard-view',view);url.searchParams.delete('view');history.replaceState(null,'',url)}
   const { data:{ session } } = await supabase.auth.getSession()
   if (!session) return renderAuth()
   await renderDashboard(session.user.id, session.user.email ?? 'Researcher')
@@ -215,7 +216,7 @@ function categoryFields(item:Item){
 
 async function renderDashboard(userId:string,email:string,showArchived=false,jwtRetry=0) {
   const savedView=sessionStorage.getItem('pulse-dashboard-view')
-  if(savedView && ['today','stack','cycles','inventory','history','tools'].includes(savedView)) dashboardView=savedView as typeof dashboardView
+  if(savedView && ['today','stack','cycles','inventory','history','tools','account'].includes(savedView)) dashboardView=savedView as typeof dashboardView
   const today=new Date()
   const [{data:items,error:itemError},{data:allItems,error:allItemError},{data:logs,error:logError},{data:schedules,error:scheduleError},{data:todayLogs,error:todayLogError},{data:inventory,error:inventoryError},{data:cycles,error:cycleError},{data:cycleItems,error:cycleItemError},{data:cycleLogs,error:cycleLogError},{data:notificationPrefs,error:notificationPrefsError}] = await Promise.all([
     supabase.from('tracked_items')
@@ -447,7 +448,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           <img class="pulse-brand-lockup" src="${pulseLogoUrl}" alt="Pulse — Science By Hugs">
           <div class="pulse-system-state"><span class="system-dot"></span><span>TRACKING SYSTEM ONLINE</span></div>
         </div>
-        <button class="ghost compact" id="signout">Sign out</button>
+        <button class="ghost account-button ${dashboardView==='account'?'active':''}" id="open-account" type="button" aria-label="Account" aria-pressed="${dashboardView==='account'}" title="Account"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg><span>Account</span></button>
       </header>
 
       <nav class="pulse-nav" aria-label="PULSE sections">
@@ -812,6 +813,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
         </div>
       </section>
 
+      ${accountScreen(email)}
+
       <dialog id="settings-modal" class="settings-modal">
         <section class="settings-shell">
           <div class="panel-head">
@@ -859,7 +862,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           </select></label>
           <label class="toggle-row"><input id="reminder-overdue-enabled" type="checkbox"><span>Overdue dose alerts</span></label>
           <label class="toggle-row"><input id="reminder-low-stock-enabled" type="checkbox"><span>Low stock, package changes & expired stock alerts</span></label>
-          ${pushPanel()}
+          <button class="ghost" id="reminder-account" type="button">Manage push notifications in Account</button>
           <button class="primary" type="submit">Save reminder settings</button>
         </form>
       </dialog>
@@ -1080,7 +1083,34 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
 
     </main>`
 
-  document.querySelector('#signout')!.addEventListener('click',async()=>{try{await disablePush();await supabase.auth.signOut();renderAuth()}catch(error:any){alert(error?.message||'Could not sign out. Try again.')}})
+  void bindAccount(email)
+  const openAccount=()=>{
+    dashboardView='account'
+    sessionStorage.setItem('pulse-dashboard-view','account')
+    const shell=document.querySelector<HTMLElement>('.app-shell')!
+    shell.dataset.view='account'
+    document.querySelectorAll('[data-view-nav]').forEach(btn=>btn.classList.remove('active'))
+    document.querySelector('#open-account')!.classList.add('active')
+    document.querySelector('#open-account')!.setAttribute('aria-pressed','true')
+    window.scrollTo({top:0,behavior:'instant'})
+    document.querySelector<HTMLElement>('#account-title')!.focus({preventScroll:true})
+  }
+  document.querySelector('#open-account')!.addEventListener('click',openAccount)
+  document.querySelector('#signout')!.addEventListener('click',async()=>{
+    const button=document.querySelector<HTMLButtonElement>('#signout')!
+    button.disabled=true
+    try{
+      await disablePush()
+      const {error}=await supabase.auth.signOut()
+      if(error) throw error
+      sessionStorage.removeItem('pulse-dashboard-view')
+      dashboardView='today'
+      renderAuth()
+    }catch(error:any){
+      document.querySelector('#account-signout-status')!.textContent=error?.message||'Could not sign out. Try again.'
+      button.disabled=false
+    }
+  })
   document.querySelectorAll<HTMLButtonElement>('[data-view-nav]').forEach(btn=>btn.addEventListener('click',()=>{
     dashboardView=(btn.dataset.viewNav||'today') as typeof dashboardView
     sessionStorage.setItem('pulse-dashboard-view',dashboardView)
@@ -1110,6 +1140,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     settingsModal.showModal()
   }
   document.querySelector('#open-settings')!.addEventListener('click',openSettings)
+  document.querySelector('#account-settings')!.addEventListener('click',openSettings)
 
   document.querySelector('#settings-export')!.addEventListener('click',async()=>{
     const button=document.querySelector<HTMLButtonElement>('#settings-export')!
@@ -1599,6 +1630,8 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     reminderModal.showModal()
   }
   document.querySelector('#open-reminders')!.addEventListener('click',openReminders)
+  document.querySelector('#account-reminders')!.addEventListener('click',openReminders)
+  document.querySelector('#reminder-account')!.addEventListener('click',()=>{reminderModal.close();openAccount();document.querySelector('#account-notifications-title')!.scrollIntoView({block:'start'})})
   document.querySelector('#reminder-form')!.addEventListener('submit',async e=>{
     e.preventDefault()
     const payload={

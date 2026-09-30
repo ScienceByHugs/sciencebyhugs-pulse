@@ -701,3 +701,30 @@ input:focus,select:focus,textarea:focus{
 .push-actions button{min-height:44px;padding:10px 14px;border:1px solid rgba(0,210,255,.3);border-radius:12px;background:rgba(0,87,255,.12);color:var(--text);font:inherit;font-size:.82rem;font-weight:700;cursor:pointer}
 .push-actions button:disabled{opacity:.5;cursor:wait}
 .push-actions button[hidden]{display:none}
+
+/* Account stays outside the six everyday navigation tabs. */
+.account-button{display:flex;align-items:center;justify-content:center;gap:8px;min-width:44px;min-height:44px;flex-shrink:0;padding:10px 12px}
+.account-button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.account-button.active{color:var(--primary);background:rgba(0,210,255,.08)}
+.app-shell[data-view="account"] .view-account{display:block!important}
+.account-screen{margin-top:22px}
+.account-heading{margin-bottom:18px}
+.account-heading h2{font-size:clamp(1.8rem,4vw,2.5rem);margin:6px 0;outline:none}
+.account-heading p{margin:0}
+.account-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.account-card{min-width:0}
+.account-card form{display:grid;gap:12px}
+.account-card input[readonly]{color:var(--muted)}
+.account-card p[role="status"]{font-size:.85rem;overflow-wrap:anywhere;margin:0;color:var(--primary)}
+.account-note{font-size:.8rem;margin:0}
+.account-notifications .push-panel{margin:0 0 14px;border:0;padding:0;background:none}
+.account-actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+#account-notifications-title{scroll-margin-top:20px}
+@media(max-width:640px){
+  .account-button span{display:none}
+  .account-button{width:44px;padding:10px}
+  .account-grid{grid-template-columns:1fr}
+  .account-screen{margin-top:14px}
+  .account-card{padding:18px}
+  .account-actions>*{flex:1}
+}
