@@ -13,7 +13,7 @@ const corsHeaders = {
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") || "{}")
-// A stable server-only service JWT avoids freshly minted gateway tokens failing iat checks at cron boundaries.\nconst serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || secretKeys.default
+const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || secretKeys.default
 const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
 const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!, { prepare: false, max: 1 })
 
