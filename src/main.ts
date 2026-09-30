@@ -1,14 +1,13 @@
 import { calculateReconstitution } from './reconstitution'
+import { pushPanel, bindPushPanel, pushEnabled, disablePush } from './push'
 import './styles.css'
 import './brand.css'
 import { doseInStockUnits, packageState, displayStock, stockNumber } from './inventory'
 import { supabase } from './supabase'
 
 const pulseLogoUrl = `${import.meta.env.BASE_URL}brand/pulse.svg`
-const pushFunctionUrl = 'https://pspiqukuhtazmkyfleii.supabase.co/functions/v1/pulse-push?action=config'
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('App root not found')
-let reminderTimer:number|undefined
 let dashboardView:'today'|'stack'|'cycles'|'inventory'|'history'|'tools'='today'
 let deferredInstallPrompt:any=null
 window.addEventListener('beforeinstallprompt',(event:any)=>{
@@ -175,62 +174,7 @@ function routeOptions(selected:string|null=''){
   return '<option value="">Select route</option>'+options.map(([value,label])=>`<option value="${value}" ${selected===value?'selected':''}>${label}</option>`).join('')
 }
 
-function urlBase64ToUint8Array(base64String:string){
-  const padding='='.repeat((4-base64String.length%4)%4)
-  const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/')
-  const raw=window.atob(base64)
-  return Uint8Array.from([...raw].map(char=>char.charCodeAt(0)))
-}
-
-async function ensureBackgroundPush(userId:string){
-  if(!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('Background push is not supported in this browser.')
-  if(!('Notification' in window)) throw new Error('Notifications are not supported in this browser.')
-  const permission=Notification.permission==='granted'?'granted':await Notification.requestPermission()
-  if(permission!=='granted') throw new Error(permission==='denied'?'Notifications are blocked in your browser settings.':'Notification permission was not granted.')
-
-  const {data:{session}}=await supabase.auth.getSession()
-  if(!session) throw new Error('Your session expired. Sign in again.')
-
-  const response=await fetch(pushFunctionUrl,{
-    headers:{Authorization:`Bearer ${session.access_token}`}
-  })
-  const config=await response.json()
-  if(!response.ok || !config.publicKey) throw new Error(config.error||'Unable to load push configuration.')
-
-  const registration=await navigator.serviceWorker.ready
-  let subscription=await registration.pushManager.getSubscription()
-  if(!subscription){
-    subscription=await registration.pushManager.subscribe({
-      userVisibleOnly:true,
-      applicationServerKey:urlBase64ToUint8Array(config.publicKey)
-    })
-  }
-  const json=subscription.toJSON()
-  const p256dh=json.keys?.p256dh
-  const auth=json.keys?.auth
-  if(!p256dh || !auth) throw new Error('Push subscription keys are unavailable.')
-
-  const {error}=await supabase.from('push_subscriptions').upsert({
-    user_id:userId,
-    endpoint:subscription.endpoint,
-    p256dh,
-    auth,
-    user_agent:navigator.userAgent,
-    updated_at:new Date().toISOString()
-  },{onConflict:'user_id,endpoint'})
-  if(error) throw error
-  return subscription
-}
-
-async function hasBackgroundPush(){
-  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return false
-  try{
-    const registration=await navigator.serviceWorker.ready
-    return !!(await registration.pushManager.getSubscription())
-  }catch{
-    return false
-  }
-}
+async function hasBackgroundPush(){ return pushEnabled().catch(()=>false) }
 
 function categoryFields(item:Item){
   return `
@@ -915,7 +859,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           </select></label>
           <label class="toggle-row"><input id="reminder-overdue-enabled" type="checkbox"><span>Overdue dose alerts</span></label>
           <label class="toggle-row"><input id="reminder-low-stock-enabled" type="checkbox"><span>Low stock, package changes & expired stock alerts</span></label>
-          <button class="ghost" id="enable-browser-notifications" type="button">Enable browser notifications</button>
+          ${pushPanel()}
           <button class="primary" type="submit">Save reminder settings</button>
         </form>
       </dialog>
@@ -1136,7 +1080,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
 
     </main>`
 
-  document.querySelector('#signout')!.addEventListener('click',async()=>{await supabase.auth.signOut();renderAuth()})
+  document.querySelector('#signout')!.addEventListener('click',async()=>{try{await disablePush();await supabase.auth.signOut();renderAuth()}catch(error:any){alert(error?.message||'Could not sign out. Try again.')}})
   document.querySelectorAll<HTMLButtonElement>('[data-view-nav]').forEach(btn=>btn.addEventListener('click',()=>{
     dashboardView=(btn.dataset.viewNav||'today') as typeof dashboardView
     sessionStorage.setItem('pulse-dashboard-view',dashboardView)
@@ -1646,68 +1590,15 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     document.querySelector('#detail-edit-inventory')!.addEventListener('click',()=>{ substanceDetailModal.close(); openInventoryEditor(stock,item) })
   }
 
-  const showBrowserNotification=(key:string,title:string,body:string)=>{
-    if(!('Notification' in window) || Notification.permission!=='granted') return
-    if(sessionStorage.getItem(key)) return
-    sessionStorage.setItem(key,'1')
-    new Notification(title,{body,icon:pulseLogoUrl})
-  }
-
-  const checkReminders=()=>{
-    const now=Date.now()
-    if(reminderPrefs.dose_reminders_enabled){
-      dueToday.filter(x=>!x.status && x.schedule.scheduled_time && x.when.getTime()>=now && x.when.getTime()-now<=reminderPrefs.reminder_lead_minutes*60000)
-        .forEach(x=>showBrowserNotification(
-          'pulse-reminder-'+x.schedule.id+'-'+dateKey(today),
-          'PULSE · Dose due soon',
-          `${x.schedule.tracked_items?.name??'Scheduled dose'} is due ${x.schedule.scheduled_time?x.when.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'today'}.`
-        ))
-    }
-    if(reminderPrefs.overdue_reminders_enabled){
-      dueToday.filter(x=>!x.status && !!x.schedule.scheduled_time && x.when.getTime()<now)
-        .forEach(x=>showBrowserNotification(
-          'pulse-overdue-'+x.schedule.id+'-'+dateKey(today),
-          'PULSE · Dose overdue',
-          `${x.schedule.tracked_items?.name??'Scheduled dose'} is overdue.`
-        ))
-    }
-    if(reminderPrefs.low_stock_notifications_enabled && inventoryAlerts.length){
-      showBrowserNotification(
-        'pulse-inventory-alert-'+dateKey(today),
-        'PULSE · Inventory alert',
-        `${inventoryAlerts.length} item${inventoryAlerts.length===1?'':'s'} need inventory attention.`
-      )
-    }
-  }
-  checkReminders()
-  if(reminderTimer) window.clearInterval(reminderTimer)
-  reminderTimer=window.setInterval(checkReminders,60000)
-
-  const openReminders=async()=>{
+  void bindPushPanel()
+  const openReminders=()=>{
     document.querySelector<HTMLInputElement>('#reminder-dose-enabled')!.checked=reminderPrefs.dose_reminders_enabled
     document.querySelector<HTMLSelectElement>('#reminder-lead')!.value=String(reminderPrefs.reminder_lead_minutes)
     document.querySelector<HTMLInputElement>('#reminder-overdue-enabled')!.checked=reminderPrefs.overdue_reminders_enabled
     document.querySelector<HTMLInputElement>('#reminder-low-stock-enabled')!.checked=reminderPrefs.low_stock_notifications_enabled
-    const button=document.querySelector<HTMLButtonElement>('#enable-browser-notifications')!
-    const subscribed=await hasBackgroundPush()
-    button.textContent=!('Notification' in window)?'Notifications unavailable':subscribed?'Background push enabled':Notification.permission==='denied'?'Notifications blocked':'Enable background push'
-    button.disabled=!('Notification' in window) || Notification.permission==='denied' || subscribed
     reminderModal.showModal()
   }
   document.querySelector('#open-reminders')!.addEventListener('click',openReminders)
-  document.querySelector('#enable-browser-notifications')!.addEventListener('click',async()=>{
-    const button=document.querySelector<HTMLButtonElement>('#enable-browser-notifications')!
-    button.disabled=true
-    button.textContent='Enabling background push…'
-    try{
-      await ensureBackgroundPush(userId)
-      button.textContent='Background push enabled'
-    }catch(error:any){
-      button.disabled=false
-      button.textContent='Enable background push'
-      alert(error?.message||'Unable to enable background push.')
-    }
-  })
   document.querySelector('#reminder-form')!.addEventListener('submit',async e=>{
     e.preventDefault()
     const payload={

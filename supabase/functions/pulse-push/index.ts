@@ -1,3 +1,4 @@
+import { ensureKeys, deliver, handleSubscription } from '../_shared/web-push.ts'
 import { packageState } from '../_shared/inventory.ts'
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js@2.117.1"
@@ -21,22 +22,7 @@ async function vaultSecret(name: string) {
   return rows[0]?.decrypted_secret as string | undefined
 }
 
-async function ensureVapid() {
-  let publicKey = await vaultSecret("pulse_vapid_public")
-  let privateKey = await vaultSecret("pulse_vapid_private")
-  if (!publicKey || !privateKey) {
-    const generated = webpush.generateVAPIDKeys()
-    publicKey = generated.publicKey
-    privateKey = generated.privateKey
-    if (!(await vaultSecret("pulse_vapid_public"))) {
-      await sql`select vault.create_secret(${publicKey}, 'pulse_vapid_public', 'PULSE Web Push VAPID public key')`
-    }
-    if (!(await vaultSecret("pulse_vapid_private"))) {
-      await sql`select vault.create_secret(${privateKey}, 'pulse_vapid_private', 'PULSE Web Push VAPID private key')`
-    }
-  }
-  return { publicKey, privateKey }
-}
+async function ensureVapid() { return ensureKeys(sql, 'pulse') }
 
 function localParts(date: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -95,23 +81,12 @@ async function markSent(userId: string, key: string) {
   await admin.from("push_delivery_log").upsert({ user_id: userId, notification_key: key, sent_at: new Date().toISOString() })
 }
 
-async function sendToUser(userId: string, subscriptions: any[], title: string, body: string, tag: string, url = "/sciencebyhugs-pulse/") {
+async function sendToUser(userId: string, subscriptions: any[], title: string, body: string, tag: string, url = './?view=today') {
   let delivered = false
   for (const sub of subscriptions.filter(s => s.user_id === userId)) {
     try {
-      await webpush.sendNotification(
-        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-        JSON.stringify({ title, body, tag, url }),
-        { TTL: 3600 }
-      )
-      delivered = true
-    } catch (error: any) {
-      if (error?.statusCode === 404 || error?.statusCode === 410) {
-        await admin.from("push_subscriptions").delete().eq("id", sub.id)
-      } else {
-        console.error("push send error", error?.statusCode, error?.message)
-      }
-    }
+      if (await deliver(admin, 'push_subscriptions', sub, { title, body, tag, url })) delivered = true
+    } catch (error: any) { console.error('Push delivery failed', error?.statusCode || 'network') }
   }
   return delivered
 }
@@ -162,7 +137,7 @@ async function dispatch() {
           const lead = Number(pref.reminder_lead_minutes || 0)
           if (diff > lead || diff <= lead-5) continue
           const existing = userLogs.find((l:any) => logMatches(l,s.id,occurrenceDate,timezone))
-          if (existing?.status === "completed") continue
+          if (existing?.status === "completed" || existing?.status === "skipped") continue
           const key = `dose:${s.id}:${occurrenceDate}:lead:${lead}`
           if (await alreadySent(pref.user_id,key)) continue
           const delivered = await sendToUser(pref.user_id,userSubs,"PULSE · Dose due soon",`${s.tracked_items?.name || "Scheduled dose"} is due soon.`,key)
@@ -203,7 +178,7 @@ async function dispatch() {
           : low ? `${name} is at your reorder threshold. Explore the NEXUS research catalog from inventory.`
           : state?.changeSoon ? `${name}: change ${row.package_type || "package"} for your next dose.`
           : `${name}: one full dose remains in the current ${row.package_type || "package"}. Have the next one ready.`
-        const delivered = await sendToUser(pref.user_id,userSubs,"PULSE · Inventory alert",body,key,"/sciencebyhugs-pulse/?view=inventory")
+        const delivered = await sendToUser(pref.user_id,userSubs,"PULSE · Inventory alert",body,key,"./?view=inventory")
         if (delivered) { await markSent(pref.user_id,key); sent++ }
       }
     }
@@ -218,16 +193,6 @@ Deno.serve(async (req: Request) => {
     const url = new URL(req.url)
     const action = url.searchParams.get("action") || "config"
 
-    if (action === "config") {
-      const authHeader = req.headers.get("Authorization") || ""
-      const token = authHeader.replace(/^Bearer\s+/i,"")
-      if (!token) return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders })
-      const { data: { user }, error } = await admin.auth.getUser(token)
-      if (error || !user) return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders })
-      const { publicKey } = await ensureVapid()
-      return Response.json({ publicKey }, { headers: corsHeaders })
-    }
-
     if (action === "dispatch") {
       const provided = req.headers.get("x-cron-key") || ""
       const expected = await vaultSecret("pulse_push_cron_secret")
@@ -236,10 +201,10 @@ Deno.serve(async (req: Request) => {
       return Response.json(result)
     }
 
-    return Response.json({ error: "Unknown action" }, { status: 400, headers: corsHeaders })
+    return await handleSubscription(req, admin, sql, 'pulse', 'push_subscriptions', corsHeaders, 'pulse')
   } catch (error: any) {
     console.error(error)
-    return Response.json({ error: error?.message || "Internal error" }, { status: 500, headers: corsHeaders })
+    return Response.json({ error: "Unable to process notifications. Please try again." }, { status: 500, headers: corsHeaders })
   }
 })
 
