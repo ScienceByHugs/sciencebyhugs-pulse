@@ -722,8 +722,8 @@ input:focus,select:focus,textarea:focus{
 .account-actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 #account-notifications-title{scroll-margin-top:20px}
 @media(max-width:640px){
-  .account-button span{display:none}
-  .account-button{width:44px;padding:10px}
+  .account-button>span:not(.profile-avatar){display:none}
+  .account-button{width:44px;padding:3px}
   .account-grid{grid-template-columns:1fr}
   .account-screen{margin-top:14px}
   .account-card{padding:18px}

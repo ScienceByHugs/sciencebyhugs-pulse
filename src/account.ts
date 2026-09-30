@@ -1,3 +1,4 @@
+import { avatarPanel } from './avatar'
 import { supabase } from './supabase'
 import { pushPanel } from './push'
 
@@ -9,6 +10,7 @@ export function accountScreen(email: string) {
     <div class="account-grid">
       <section class="panel account-card" aria-labelledby="account-profile-title">
         <h3 id="account-profile-title">Profile</h3>
+        ${avatarPanel(false)}
         <form id="account-profile-form">
           <label>Display name<input id="account-name" maxlength="80" autocomplete="nickname" placeholder="How should we call you?"></label>
           <label>Email<input type="email" value="${escapeHtml(email)}" readonly autocomplete="email"></label>

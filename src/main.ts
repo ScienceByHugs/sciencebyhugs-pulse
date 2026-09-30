@@ -1,3 +1,4 @@
+import { avatarMarkup, bindAvatars } from './avatar'
 import { calculateReconstitution } from './reconstitution'
 import { bindPushPanel, pushEnabled, disablePush } from './push'
 import { accountScreen, bindAccount } from './account'
@@ -448,7 +449,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
           <img class="pulse-brand-lockup" src="${pulseLogoUrl}" alt="Pulse — Science By Hugs">
           <div class="pulse-system-state"><span class="system-dot"></span><span>TRACKING SYSTEM ONLINE</span></div>
         </div>
-        <button class="ghost account-button ${dashboardView==='account'?'active':''}" id="open-account" type="button" aria-label="Account" aria-pressed="${dashboardView==='account'}" title="Account"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg><span>Account</span></button>
+        <button class="ghost account-button ${dashboardView==='account'?'active':''}" id="open-account" type="button" aria-label="Account" aria-pressed="${dashboardView==='account'}" title="Account">${avatarMarkup()}<span>Account</span></button>
       </header>
 
       <nav class="pulse-nav" aria-label="PULSE sections">
@@ -1083,6 +1084,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
 
     </main>`
 
+  void bindAvatars()
   void bindAccount(email)
   const openAccount=()=>{
     dashboardView='account'
