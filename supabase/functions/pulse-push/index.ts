@@ -15,7 +15,7 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const secretKeys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") || "{}")
 const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || secretKeys.default
 const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
-const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!, { prepare: false, max: 1 })
+const sql = postgres(Deno.env.get("SUPABASE_DB_URL")!, { prepare: false, max: 1, idle_timeout: 1, connect_timeout: 10 })
 
 async function vaultSecret(name: string) {
   const rows = await sql`select decrypted_secret from vault.decrypted_secrets where name = ${name} limit 1`
