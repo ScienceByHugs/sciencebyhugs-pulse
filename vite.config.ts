@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-const base = '/sciencebyhugs-pulse/'
+// Pages supplies an empty base path for a custom domain and a repository path otherwise.
+const pagesPath = process.env.PULSE_BASE_PATH
+const base = pagesPath === undefined ? '/sciencebyhugs-pulse/' : `${pagesPath.replace(/\/$/, '')}/`
 
 export default defineConfig({
   base,
