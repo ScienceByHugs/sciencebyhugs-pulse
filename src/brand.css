@@ -45,3 +45,28 @@ header{border-bottom-color:rgba(0,210,255,.18)}
 }
 .metric-inventory:before{background:var(--pulse-violet)}
 .metric-adherence strong,.beta-badge{color:var(--pulse-violet)}
+
+/* Keep mobile authentication branding close to the form. */
+@media(max-width:760px){
+  .auth-shell{
+    min-height:100dvh;
+    align-content:start;
+    align-items:start;
+    gap:20px;
+    padding-top:max(20px, calc(12px + env(safe-area-inset-top, 0px)));
+    padding-bottom:calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+  .auth-shell .pulse-auth-lockup{
+    width:min(280px,85%);
+    margin-bottom:10px;
+  }
+  .auth-shell .brand-panel>p{margin:0;font-size:.9rem}
+  .auth-shell .pulse-line{margin-top:16px}
+  .auth-shell .auth-card{padding:20px}
+  .auth-shell .auth-card h2{font-size:clamp(1.65rem,6vw,2rem)}
+  .auth-shell .auth-card>.muted{font-size:.9rem;line-height:1.5;margin:10px 0 0}
+  .auth-shell .auth-card form{margin-top:18px}
+}
+@media(max-width:760px) and (display-mode:standalone){
+  .auth-shell{padding-top:calc(12px + max(59px, env(safe-area-inset-top, 0px)))}
+}
