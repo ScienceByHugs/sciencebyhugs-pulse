@@ -1087,6 +1087,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   void bindAvatars()
   void bindAccount(email)
   const openAccount=()=>{
+    void bindAvatars('', true)
     dashboardView='account'
     sessionStorage.setItem('pulse-dashboard-view','account')
     const shell=document.querySelector<HTMLElement>('.app-shell')!
