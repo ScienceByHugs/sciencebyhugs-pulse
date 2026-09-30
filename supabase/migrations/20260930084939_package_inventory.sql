@@ -217,4 +217,3 @@ revoke all on function public.decrement_inventory(uuid,numeric) from public,anon
 grant execute on function public.pulse_stock_dose(numeric,text,public.inventory) to authenticated,service_role;
 grant execute on function public.pulse_save_inventory(uuid,uuid,jsonb,jsonb,jsonb) to authenticated;
 grant execute on function public.decrement_inventory(uuid,numeric) to authenticated;
-
