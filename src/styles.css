@@ -441,7 +441,7 @@ body{
     linear-gradient(180deg,#070a0f 0%,#080c12 48%,#06090e 100%);
 }
 body:before{opacity:.24;background-size:40px 40px}
-.app-shell{width:min(1180px,calc(100% - 28px));padding-top:18px}
+.app-shell{width:min(1180px,calc(100% - 28px));padding-top:calc(18px + env(safe-area-inset-top, 0px))}
 .pulse-header{
   border-bottom:0;
   padding:10px 2px 14px;
@@ -603,8 +603,8 @@ input:focus,select:focus,textarea:focus{
 @media(max-width:760px){
   .app-shell{
     width:min(100% - 20px,1180px);
-    padding-top:10px;
-    padding-bottom:118px
+    padding-top:calc(10px + env(safe-area-inset-top, 0px));
+    padding-bottom:calc(118px + env(safe-area-inset-bottom, 0px))
   }
   .pulse-header{padding-top:6px}
   .pulse-brand-lockup{width:228px}
@@ -647,4 +647,17 @@ input:focus,select:focus,textarea:focus{
 }
 @media(prefers-reduced-motion:reduce){
   .primary,.ghost{transition:none}
+}
+
+/* Keep installed mobile headers below the status bar, including iOS launches
+   that temporarily report a zero safe-area inset. */
+@media(max-width:760px){
+  .auth-shell{
+    padding-top:max(42px, calc(16px + env(safe-area-inset-top, 0px)));
+    padding-bottom:calc(42px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media(max-width:760px) and (display-mode:standalone){
+  .app-shell{padding-top:calc(10px + max(59px, env(safe-area-inset-top, 0px)))}
+  .auth-shell{padding-top:calc(16px + max(59px, env(safe-area-inset-top, 0px)))}
 }
