@@ -29,11 +29,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
       - name: Build
         run: npm run build
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+        env:
+          PULSE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
