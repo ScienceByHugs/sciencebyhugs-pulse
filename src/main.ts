@@ -1,3 +1,4 @@
+import { calculateReconstitution } from './reconstitution'
 import './styles.css'
 import './brand.css'
 import { doseInStockUnits, packageState, displayStock, stockNumber } from './inventory'
@@ -710,6 +711,45 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
 `:''}
 
 
+      <div class="view-section view-tools tool-switch" role="group" aria-label="Calculator">
+        <button type="button" class="ghost active" data-tool="split" aria-pressed="true">Split dose</button>
+        <button type="button" class="ghost" data-tool="reconstitution" aria-pressed="false">Reconstitution</button>
+      </div>
+      <section class="panel view-section view-tools reconstitution-screen" hidden>
+        <div class="panel-head"><div><span class="kicker">TOOLS</span><h3>Peptide Reconstitution Calculator</h3><p class="muted compact-copy">Convert a vial amount and liquid volume into concentration and a target measurement.</p></div></div>
+        <div class="calculator-layout">
+          <form id="recon-form" class="calculator-form">
+            <fieldset class="calc-fieldset"><legend>1 · Total peptide in vial</legend>
+              <label>Vial amount (mg)<input id="recon-vial" type="number" inputmode="decimal" min="0" step="any" placeholder="Enter vial amount"></label>
+              <div class="recon-presets" aria-label="mg presets"><button type="button" class="ghost compact" data-recon-target="recon-vial" data-recon-value="1">1 mg</button><button type="button" class="ghost compact" data-recon-target="recon-vial" data-recon-value="5">5 mg</button><button type="button" class="ghost compact" data-recon-target="recon-vial" data-recon-value="10">10 mg</button><button type="button" class="ghost compact" data-recon-target="recon-vial" data-recon-value="15">15 mg</button><button type="button" class="ghost compact" data-recon-target="recon-vial" data-recon-value="20">20 mg</button><button type="button" class="ghost compact" data-recon-target="recon-vial" data-recon-value="50">50 mg</button></div>
+            </fieldset>
+            <fieldset class="calc-fieldset"><legend>2 · Liquid volume</legend>
+              <label>Reconstituted volume (mL)<input id="recon-volume" type="number" inputmode="decimal" min="0" step="any" placeholder="Enter liquid volume"></label>
+              <div class="recon-presets" aria-label="mL presets"><button type="button" class="ghost compact" data-recon-target="recon-volume" data-recon-value="0.5">0.5 mL</button><button type="button" class="ghost compact" data-recon-target="recon-volume" data-recon-value="1">1 mL</button><button type="button" class="ghost compact" data-recon-target="recon-volume" data-recon-value="1.5">1.5 mL</button><button type="button" class="ghost compact" data-recon-target="recon-volume" data-recon-value="2">2 mL</button><button type="button" class="ghost compact" data-recon-target="recon-volume" data-recon-value="2.5">2.5 mL</button><button type="button" class="ghost compact" data-recon-target="recon-volume" data-recon-value="3">3 mL</button></div>
+              <small>Use the final solution volume. If your instructions treat added diluent as the final volume, enter that value.</small>
+            </fieldset>
+            <fieldset class="calc-fieldset"><legend>3 · Target amount</legend>
+              <div class="split"><label>Amount<input id="recon-dose" type="number" inputmode="decimal" min="0" step="any" placeholder="Enter established amount"></label>
+              <label>Unit<select id="recon-unit"><option value="mg">mg</option><option value="mcg">mcg</option></select></label></div>
+            </fieldset>
+            <label>U-100 syringe size<select id="recon-capacity"><option value="1">1 mL · 100 units</option><option value="0.5">0.5 mL · 50 units</option><option value="0.3">0.3 mL · 30 units</option></select></label>
+            <button class="ghost" type="reset">Clear calculator</button>
+          </form>
+          <aside class="calculator-results" aria-live="polite">
+            <span class="kicker">RESULT</span>
+            <div class="calc-primary-result"><small>Volume for your target amount</small><strong id="recon-draw">—</strong></div>
+            <div class="calc-result-grid">
+              <div><span>U-100 MEASUREMENT</span><strong id="recon-units">—</strong></div>
+              <div><span>CONCENTRATION</span><strong id="recon-concentration">—</strong></div>
+              <div><span>TARGET AMOUNT</span><strong id="recon-target">—</strong></div>
+              <div><span>FULL AMOUNTS PER VIAL</span><strong id="recon-count">—</strong></div>
+            </div>
+            <div id="recon-scale-wrap" hidden><div class="recon-scale" role="img" aria-label="U-100 measurement scale"><div id="recon-fill"></div></div><div class="recon-scale-labels"><span>0</span><span id="recon-scale-end">100 units</span></div><small>Illustrative scale; syringe markings vary. Values are approximate and are not rounded to a syringe graduation.</small></div>
+            <div id="recon-validation" class="calc-validation">Enter all three values to calculate.</div>
+            <div class="calc-disclaimer"><b>Calculation tool only.</b> Enter an already established amount and follow the supplied reconstitution instructions. U-100 markings represent volume: 100 units = 1 mL, not peptide potency. This calculator does not select a dose or mixing instructions.</div>
+          </aside>
+        </div>
+      </section>
       <section class="panel view-section view-tools calculator-screen">
         <div class="panel-head">
           <div>
@@ -1207,6 +1247,48 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
   const historyModal=document.querySelector<HTMLDialogElement>('#history-modal')!
   const inventoryModal=document.querySelector<HTMLDialogElement>('#inventory-modal')!
   const inventoryEditModal=document.querySelector<HTMLDialogElement>('#inventory-edit-modal')!
+
+  document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(button=>button.addEventListener('click',()=>{
+    const recon=button.dataset.tool==='reconstitution'
+    document.querySelector<HTMLElement>('.reconstitution-screen')!.hidden=!recon
+    document.querySelector<HTMLElement>('.calculator-screen')!.hidden=recon
+    document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(tab=>{
+      const active=tab===button;tab.classList.toggle('active',active);tab.setAttribute('aria-pressed',String(active))
+    })
+  }))
+  const reconInput=(id:string)=>document.querySelector<HTMLInputElement|HTMLSelectElement>('#'+id)!
+  const updateReconstitution=()=>{
+    const validation=document.querySelector<HTMLElement>('#recon-validation')!
+    const scale=document.querySelector<HTMLElement>('#recon-scale-wrap')!
+    for(const id of ['draw','units','concentration','target','count'])document.querySelector<HTMLElement>('#recon-'+id)!.textContent='—'
+    scale.hidden=true;validation.classList.remove('warning')
+    if(['recon-vial','recon-volume','recon-dose'].some(id=>!reconInput(id).value)){validation.textContent='Enter all three values to calculate.';return}
+    try{
+      const unit=reconInput('recon-unit').value,capacity=Number(reconInput('recon-capacity').value)
+      const result=calculateReconstitution(Number(reconInput('recon-vial').value),Number(reconInput('recon-volume').value),Number(reconInput('recon-dose').value),unit,capacity)
+      const precise=(n:number)=>Number(n.toPrecision(8)).toString()
+      document.querySelector<HTMLElement>('#recon-draw')!.textContent='≈ '+precise(result.drawMl)+' mL'
+      document.querySelector<HTMLElement>('#recon-units')!.textContent='≈ '+precise(result.units)+' units'
+      document.querySelector<HTMLElement>('#recon-concentration')!.textContent='≈ '+precise(result.concentration)+' mg/mL'
+      document.querySelector<HTMLElement>('#recon-target')!.textContent=reconInput('recon-dose').value+' '+unit
+      document.querySelector<HTMLElement>('#recon-count')!.textContent=String(Math.floor(result.doses+Number.EPSILON*Math.max(1,result.doses)*4))
+      validation.textContent=result.exceedsSyringe?'Calculated volume exceeds the selected syringe capacity. Choose a size that fits the calculated volume.':'Calculated from your entries. Full amounts per vial exclude handling losses.'
+      validation.classList.toggle('warning',result.exceedsSyringe)
+      if(!result.exceedsSyringe){
+        scale.hidden=false
+        document.querySelector<HTMLElement>('#recon-fill')!.style.width=(result.drawMl/capacity*100)+'%'
+        document.querySelector<HTMLElement>('#recon-scale-end')!.textContent=(capacity*100)+' units'
+        document.querySelector<HTMLElement>('.recon-scale')!.setAttribute('aria-label',precise(result.units)+' of '+(capacity*100)+' U-100 units')
+      }
+    }catch(error){validation.textContent=(error as Error).message}
+  }
+  document.querySelector('#recon-form')!.addEventListener('submit',e=>e.preventDefault())
+  document.querySelector('#recon-form')!.addEventListener('input',updateReconstitution)
+  document.querySelector('#recon-form')!.addEventListener('change',updateReconstitution)
+  document.querySelector('#recon-form')!.addEventListener('reset',()=>setTimeout(updateReconstitution,0))
+  document.querySelectorAll<HTMLButtonElement>('[data-recon-target]').forEach(button=>button.addEventListener('click',()=>{
+    reconInput(button.dataset.reconTarget!).value=button.dataset.reconValue!;updateReconstitution()
+  }))
 
   const calcItem=document.querySelector<HTMLSelectElement>('#calc-item')
   const calcWeekly=document.querySelector<HTMLInputElement>('#calc-weekly-dose')
