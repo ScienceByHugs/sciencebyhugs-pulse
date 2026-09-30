@@ -68,5 +68,5 @@ header{border-bottom-color:rgba(0,210,255,.18)}
   .auth-shell .auth-card form{margin-top:18px}
 }
 @media(max-width:760px) and (display-mode:standalone){
-  .auth-shell{padding-top:calc(12px + max(59px, env(safe-area-inset-top, 0px)))}
+  .auth-shell{padding-top:calc(8px + env(safe-area-inset-top, 0px))}
 }
