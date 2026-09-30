@@ -681,3 +681,16 @@ input:focus,select:focus,textarea:focus{
 .inventory-form-actions{position:sticky;bottom:-22px;padding:12px 0;background:var(--surface);z-index:2}
 .inventory-attention{display:grid;gap:10px;margin-bottom:14px;padding:16px}.inventory-attention p{margin:0;font-size:.82rem;line-height:1.5}
 @media(max-width:760px){.package-editor{padding:16px;border-radius:20px}.inventory-step{padding:13px}.inventory-form-actions{bottom:-16px}.inventory-form-actions>*{min-height:50px}}
+
+/* Calculator selection and reconstitution */
+.app-shell[data-view="tools"] .tool-switch{display:flex!important;gap:8px;margin:18px 0 12px}
+.tool-switch button{flex:1;min-width:0}
+.tool-switch button.active{color:var(--primary);border-color:rgba(0,210,255,.4);background:rgba(0,210,255,.08)}
+.app-shell[data-view="tools"] .reconstitution-screen{display:block!important;padding:20px}
+.app-shell[data-view="tools"] .calculator-screen[hidden],
+.app-shell[data-view="tools"] .reconstitution-screen[hidden]{display:none!important}
+.recon-presets{display:flex;flex-wrap:wrap;gap:6px}
+.recon-presets button{min-height:44px}
+.recon-scale{height:32px;position:relative;overflow:hidden;border:1px solid var(--border);border-radius:8px;background:repeating-linear-gradient(90deg,transparent 0,transparent calc(10% - 1px),rgba(255,255,255,.22) calc(10% - 1px),rgba(255,255,255,.22) 10%),rgba(255,255,255,.025)}
+#recon-fill{height:100%;background:linear-gradient(90deg,rgba(0,210,255,.2),rgba(0,210,255,.6))}
+.recon-scale-labels{display:flex;justify-content:space-between;margin:6px 0;font-size:.75rem;color:var(--muted)}
