@@ -73,45 +73,40 @@ function logMatches(log: any, scheduleId: string, dateKey: string, timeZone: str
 }
 
 async function alreadySent(userId: string, key: string) {
-  const { data } = await admin.from("push_delivery_log").select("notification_key").eq("user_id", userId).eq("notification_key", key).maybeSingle()
-  return !!data
+  const rows=await sql`select notification_key from public.push_delivery_log where user_id=${userId} and notification_key=${key} limit 1`
+  return rows.length>0
 }
-
 async function markSent(userId: string, key: string) {
-  await admin.from("push_delivery_log").upsert({ user_id: userId, notification_key: key, sent_at: new Date().toISOString() })
+  await sql`insert into public.push_delivery_log(user_id,notification_key,sent_at) values(${userId},${key},now()) on conflict(user_id,notification_key) do update set sent_at=now()`
 }
 
 async function sendToUser(userId: string, subscriptions: any[], title: string, body: string, tag: string, url = './?view=today') {
   let delivered = false
   for (const sub of subscriptions.filter(s => s.user_id === userId)) {
     try {
-      if (await deliver(admin, 'push_subscriptions', sub, { title, body, tag, url })) delivered = true
+      if (await deliver(admin, 'push_subscriptions', sub, { title, body, tag, url }, sql)) delivered = true
     } catch (error: any) { console.error('Push delivery failed', error?.statusCode || 'network') }
   }
   return delivered
 }
 
 async function dispatch() {
+  const subs=await sql`select * from public.push_subscriptions`
+  if (!subs.length) return {sent:0}
   const { publicKey, privateKey } = await ensureVapid()
-  webpush.setVapidDetails("mailto:notifications@sciencebyhugs.com", publicKey, privateKey)
-
-  const [
-    { data: prefs, error: prefsError },
-    { data: subs, error: subsError },
-    { data: profiles, error: profilesError },
-    { data: schedules, error: schedulesError },
-    { data: logs, error: logsError },
-    { data: inventory, error: inventoryError },
-  ] = await Promise.all([
-    admin.from("notification_preferences").select("*"),
-    admin.from("push_subscriptions").select("*"),
-    admin.from("profiles").select("user_id,timezone"),
-    admin.from("schedules").select("id,user_id,frequency,scheduled_time,days_of_week,interval_days,start_date,end_date,active,tracked_items(name,active)").eq("active",true),
-    admin.from("logs").select("user_id,schedule_id,scheduled_for,status").gte("logged_at", new Date(Date.now()-3*86400000).toISOString()),
-    admin.from("inventory").select("id,user_id,quantity,unit,low_threshold,expiration_date,package_amount,package_type,strength_amount,strength_unit,strength_per_amount,strength_per_unit,tracked_items(name,default_amount,default_unit)"),
+  webpush.setVapidDetails('mailto:notifications@sciencebyhugs.com',publicKey,privateKey)
+  // Direct database reads avoid short-lived gateway JWT clock skew in scheduled jobs.
+  const [prefs,profiles,schedules,logs,inventory]=await Promise.all([
+    sql`select * from public.notification_preferences`,
+    sql`select user_id,timezone from public.profiles`,
+    sql`select s.*,s.start_date::text as start_date,s.end_date::text as end_date,s.scheduled_time::text as scheduled_time,
+      jsonb_build_object('name',t.name,'active',t.active) as tracked_items
+      from public.schedules s join public.tracked_items t on t.id=s.tracked_item_id where s.active`,
+    sql`select user_id,schedule_id,scheduled_for,status from public.logs where logged_at>=now()-interval '3 days'`,
+    sql`select i.*,i.expiration_date::text as expiration_date,
+      jsonb_build_object('name',t.name,'default_amount',t.default_amount,'default_unit',t.default_unit) as tracked_items
+      from public.inventory i join public.tracked_items t on t.id=i.tracked_item_id`,
   ])
-  const problem = prefsError || subsError || profilesError || schedulesError || logsError || inventoryError
-  if (problem) throw problem
 
   const now = new Date()
   let sent = 0
