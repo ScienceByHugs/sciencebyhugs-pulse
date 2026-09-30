@@ -1,3 +1,4 @@
+import { packageState } from '../_shared/inventory.ts'
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js@2.117.1"
 import postgres from "npm:postgres@3.4.5"
@@ -71,7 +72,7 @@ function dayDiffKeys(a: string, b: string) {
 }
 
 function dueOn(schedule: any, dateKey: string) {
-  if (!schedule.active || schedule.frequency === "as_needed" || dateKey < schedule.start_date) return false
+  if (!schedule.active || schedule.frequency === "as_needed" || dateKey < schedule.start_date || (schedule.end_date && dateKey > schedule.end_date)) return false
   if (schedule.frequency === "daily") return true
   if (schedule.frequency === "interval") return !!schedule.interval_days && dayDiffKeys(dateKey, schedule.start_date) % schedule.interval_days === 0
   const days = schedule.days_of_week || []
@@ -94,13 +95,13 @@ async function markSent(userId: string, key: string) {
   await admin.from("push_delivery_log").upsert({ user_id: userId, notification_key: key, sent_at: new Date().toISOString() })
 }
 
-async function sendToUser(userId: string, subscriptions: any[], title: string, body: string, tag: string) {
+async function sendToUser(userId: string, subscriptions: any[], title: string, body: string, tag: string, url = "/sciencebyhugs-pulse/") {
   let delivered = false
   for (const sub of subscriptions.filter(s => s.user_id === userId)) {
     try {
       await webpush.sendNotification(
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-        JSON.stringify({ title, body, tag, url: "/sciencebyhugs-pulse/" }),
+        JSON.stringify({ title, body, tag, url }),
         { TTL: 3600 }
       )
       delivered = true
@@ -130,9 +131,9 @@ async function dispatch() {
     admin.from("notification_preferences").select("*"),
     admin.from("push_subscriptions").select("*"),
     admin.from("profiles").select("user_id,timezone"),
-    admin.from("schedules").select("id,user_id,frequency,scheduled_time,days_of_week,interval_days,start_date,active,tracked_items(name,active)").eq("active",true),
+    admin.from("schedules").select("id,user_id,frequency,scheduled_time,days_of_week,interval_days,start_date,end_date,active,tracked_items(name,active)").eq("active",true),
     admin.from("logs").select("user_id,schedule_id,scheduled_for,status").gte("logged_at", new Date(Date.now()-3*86400000).toISOString()),
-    admin.from("inventory").select("id,user_id,quantity,unit,low_threshold,expiration_date,tracked_items(name)"),
+    admin.from("inventory").select("id,user_id,quantity,unit,low_threshold,expiration_date,package_amount,package_type,strength_amount,strength_unit,strength_per_amount,strength_per_unit,tracked_items(name,default_amount,default_unit)"),
   ])
   const problem = prefsError || subsError || profilesError || schedulesError || logsError || inventoryError
   if (problem) throw problem
@@ -187,13 +188,22 @@ async function dispatch() {
 
     if (pref.low_stock_notifications_enabled) {
       for (const row of (inventory || []).filter((i:any)=>i.user_id===pref.user_id)) {
+        const state = packageState(row,row.tracked_items?.default_amount,row.tracked_items?.default_unit)
         const low = row.low_threshold !== null && Number(row.quantity) <= Number(row.low_threshold)
         const expired = !!row.expiration_date && row.expiration_date < lp.date
-        if (!low && !expired) continue
-        const key = `inventory:${row.id}:${lp.date}`
+        const change = state?.changeSoon || state?.lastDoseInPackage
+        const out = state?.out || Number(row.quantity)===0
+        if (!low && !expired && !change && !out) continue
+        const reason = out ? "out" : expired ? "expired" : low ? "low" : "package"
+        const key = `inventory:${row.id}:${reason}:${lp.date}`
         if (await alreadySent(pref.user_id,key)) continue
-        const reason = low && expired ? "low stock and expired" : low ? "running low" : "expired"
-        const delivered = await sendToUser(pref.user_id,userSubs,"PULSE · Inventory alert",`${row.tracked_items?.name || "An item"} is ${reason}.`,key)
+        const name = row.tracked_items?.name || "An item"
+        const body = out ? `${name} has insufficient stock for another dose. Review inventory and explore the NEXUS research catalog.`
+          : expired ? `${name} has expired. Review your stock in PULSE.`
+          : low ? `${name} is at your reorder threshold. Explore the NEXUS research catalog from inventory.`
+          : state?.changeSoon ? `${name}: change ${row.package_type || "package"} for your next dose.`
+          : `${name}: one full dose remains in the current ${row.package_type || "package"}. Have the next one ready.`
+        const delivered = await sendToUser(pref.user_id,userSubs,"PULSE · Inventory alert",body,key,"/sciencebyhugs-pulse/?view=inventory")
         if (delivered) { await markSent(pref.user_id,key); sent++ }
       }
     }
@@ -232,3 +242,4 @@ Deno.serve(async (req: Request) => {
     return Response.json({ error: error?.message || "Internal error" }, { status: 500, headers: corsHeaders })
   }
 })
+
