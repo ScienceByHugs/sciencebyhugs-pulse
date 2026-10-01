@@ -1,3 +1,4 @@
+import { marketingPanel, bindMarketing } from './marketing'
 import { avatarPanel } from './avatar'
 import { supabase } from './supabase'
 import { pushPanel } from './push'
@@ -34,6 +35,7 @@ export function accountScreen(email: string) {
       <section class="panel account-card account-notifications" aria-labelledby="account-notifications-title">
         <h3 id="account-notifications-title">Notifications</h3>
         ${pushPanel()}
+        ${marketingPanel()}
         <button class="ghost" id="account-reminders" type="button">Dose & inventory reminder settings</button>
       </section>
       <section class="panel account-card account-session" aria-labelledby="account-session-title">
@@ -47,6 +49,7 @@ export function accountScreen(email: string) {
 }
 
 export async function bindAccount(email: string) {
+  void bindMarketing('pulse')
   const name = document.querySelector<HTMLInputElement>('#account-name')!
   const profileStatus = document.querySelector<HTMLElement>('#account-profile-status')!
   const passwordStatus = document.querySelector<HTMLElement>('#account-password-status')!
