@@ -1,6 +1,6 @@
 import { avatarMarkup, bindAvatars } from './avatar'
 import { calculateReconstitution } from './reconstitution'
-import { bindPushPanel, pushEnabled, disablePush } from './push'
+import { bindPushPanel, pushEnabled, disablePush, pushPrompt } from './push'
 import { accountScreen, bindAccount } from './account'
 import './styles.css'
 import './brand.css'
@@ -443,6 +443,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     .sort((a,b)=>(a.supply!.daysRemaining??999)-(b.supply!.daysRemaining??999))
 
   app!.innerHTML=`
+    ${pushPrompt()}
     <main class="app-shell" data-view="${dashboardView}">
       <header class="pulse-header">
         <div class="pulse-header-brand">
@@ -1624,7 +1625,7 @@ async function renderDashboard(userId:string,email:string,showArchived=false,jwt
     document.querySelector('#detail-edit-inventory')!.addEventListener('click',()=>{ substanceDetailModal.close(); openInventoryEditor(stock,item) })
   }
 
-  void bindPushPanel()
+  void bindPushPanel(userId)
   const openReminders=()=>{
     document.querySelector<HTMLInputElement>('#reminder-dose-enabled')!.checked=reminderPrefs.dose_reminders_enabled
     document.querySelector<HTMLSelectElement>('#reminder-lead')!.value=String(reminderPrefs.reminder_lead_minutes)
