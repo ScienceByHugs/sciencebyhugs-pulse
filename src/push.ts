@@ -88,9 +88,26 @@ export function pushPanel() {
   </section>`
 }
 
-export async function bindPushPanel() {
+export function pushPrompt() {
+  return `<aside class="push-prompt push-prompt-popup" data-push-prompt hidden aria-label="Enable notifications">
+    <p>We noticed you don’t have notifications enabled.</p>
+    <div class="push-prompt-actions"><button type="button" data-push-enable>Enable notifications</button><button type="button" data-push-dismiss>Not now</button></div>
+    <p data-push-prompt-status role="status" aria-live="polite"></p>
+  </aside>`
+}
+
+let bindingVersion = 0
+export async function bindPushPanel(userId?: string) {
+  if (userId === undefined) {
+    const { data: { session } } = await supabase.auth.getSession()
+    userId = session?.user.id || ''
+  }
   let panel = document.querySelector<HTMLElement>('.push-panel')
-  if (!panel) return
+  if (!panel) {
+    const holder = document.createElement('div')
+    holder.innerHTML = pushPanel()
+    panel = holder.querySelector<HTMLElement>('.push-panel')!
+  }
   if (panel.dataset.bound) {
     const fresh = panel.cloneNode(true) as HTMLElement
     panel.replaceWith(fresh)
@@ -100,26 +117,56 @@ export async function bindPushPanel() {
   const button = panel.querySelector<HTMLButtonElement>('[data-push-toggle]')!
   const test = panel.querySelector<HTMLButtonElement>('[data-push-test]')!
   const status = panel.querySelector<HTMLElement>('[data-push-status]')!
+  const version = ++bindingVersion
+  const prompt = document.querySelector<HTMLElement>('[data-push-prompt]')
+  const promptButton = prompt?.querySelector<HTMLButtonElement>('[data-push-enable]')
+  const promptStatus = prompt?.querySelector<HTMLElement>('[data-push-prompt-status]')
+  if (prompt) prompt.hidden = true
+  if (promptStatus) promptStatus.textContent = ''
+  if (!userId) { button.disabled = true; return }
+  const dismissalKey = `pulse-push-prompt-dismissed:${userId}`
+  let dismissed = false
+  try { dismissed = sessionStorage.getItem(dismissalKey) === 'true' } catch {}
+  const dismissButton = prompt?.querySelector<HTMLButtonElement>('[data-push-dismiss]')
+  if (dismissButton) dismissButton.onclick = () => {
+    dismissed = true
+    if (prompt) prompt.hidden = true
+    try { sessionStorage.setItem(dismissalKey, 'true') } catch {}
+  }
   let enabled = false
+  let checked = false
   const update = () => {
+    if (version !== bindingVersion) return
+    if (prompt) prompt.hidden = !checked || enabled || dismissed
+    if (promptButton) promptButton.disabled = false
     button.textContent = enabled ? 'Turn off on this device' : 'Enable notifications'
     button.disabled = false
     test.hidden = !enabled
     status.textContent = enabled ? 'Enabled on this device.' : 'Not enabled on this device.'
   }
-  try { enabled = await pushEnabled(); update() }
+  try { enabled = await pushEnabled(); checked = true; update() }
   catch (error) { update(); status.textContent = error instanceof Error ? error.message : 'Could not check notification settings.' }
-  button.addEventListener('click', async () => {
+  const change = async (enableOnly = false) => {
+    if (version !== bindingVersion || button.disabled) return
+    if (enableOnly && enabled) return
     button.disabled = true
+    if (promptButton) promptButton.disabled = true
+    if (promptStatus) promptStatus.textContent = ''
     try {
-      if (enabled) await disablePush(); else await enablePush()
-      enabled = !enabled
+      if (enabled && !enableOnly) await disablePush(); else await enablePush()
+      enabled = enableOnly || !enabled
+      checked = true
       update()
     } catch (error) {
       update()
       status.textContent = error instanceof Error ? error.message : 'Could not update notifications.'
+      if (promptStatus) promptStatus.textContent = status.textContent
     }
-  })
+  }
+  button.addEventListener('click', () => { void change() })
+  // Keep the permission request on the original click, including on iOS.
+  if (promptButton) promptButton.onclick = () => { void change(true) }
+
   test.addEventListener('click', async () => {
     test.disabled = true
     try { await testPush(); status.textContent = 'Test sent. Check your notifications.' }

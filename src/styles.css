@@ -729,3 +729,13 @@ input:focus,select:focus,textarea:focus{
   .account-card{padding:18px}
   .account-actions>*{flex:1}
 }
+
+.push-prompt{padding:14px 16px;margin:16px 0;border:1px solid rgba(0,210,255,.3);border-radius:16px;background:rgba(0,87,255,.08)}
+.push-prompt[hidden]{display:none}.push-prompt p{margin:0 0 8px;font-size:.85rem;line-height:1.5;color:var(--muted)}
+.push-prompt button{min-height:44px;padding:8px 0;border:0;background:none;color:var(--cyan,#00d2ff);font:inherit;font-size:.85rem;font-weight:800;text-align:left;cursor:pointer}
+.push-prompt button:disabled{opacity:.5;cursor:wait}.push-prompt button:focus-visible{outline:2px solid var(--cyan,#00d2ff);outline-offset:3px;border-radius:4px}
+.push-prompt [data-push-prompt-status]:empty{display:none}
+
+.push-prompt-popup{position:fixed;right:24px;bottom:24px;width:min(380px,calc(100vw - 32px));max-height:calc(100dvh - 130px);overflow:auto;z-index:51;margin:0;box-sizing:border-box;background:#0b1725;box-shadow:0 16px 60px rgba(0,0,0,.55)}
+.push-prompt-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.push-prompt-actions [data-push-dismiss]{color:var(--muted);font-weight:600}
+@media(max-width:760px){.push-prompt-popup{right:16px;bottom:calc(104px + env(safe-area-inset-bottom))}}
