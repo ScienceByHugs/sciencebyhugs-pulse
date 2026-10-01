@@ -761,3 +761,52 @@ dialog input,dialog select,dialog textarea,dialog button{
     max-width:calc(100vw - 12px);
   }
 }
+
+
+/* Centered quick-log layout */
+#log-modal #log-form{
+  width:100%;
+  margin:0 auto;
+}
+#log-modal #log-form > label,
+#log-modal #category-fields label{
+  text-align:center;
+}
+#log-modal #log-form input:not([type="hidden"]),
+#log-modal #log-form select,
+#log-modal #log-form textarea{
+  text-align:center;
+  text-align-last:center;
+}
+#log-modal #log-form textarea::placeholder,
+#log-modal #log-form input::placeholder{
+  text-align:center;
+}
+#log-modal #log-stock-note{
+  text-align:center;
+}
+#log-modal #log-form > .panel-head{
+  position:relative;
+  justify-content:center;
+  text-align:center;
+  padding-inline:72px;
+}
+#log-modal #log-form > .panel-head > div{
+  width:100%;
+}
+#log-modal #log-form > .panel-head .modal-close{
+  position:absolute;
+  right:0;
+  top:0;
+}
+#log-modal .split{
+  align-items:start;
+}
+#log-modal .log-form-actions{
+  justify-content:center;
+}
+@media(max-width:520px){
+  #log-modal #log-form > .panel-head{
+    padding-inline:62px;
+  }
+}
