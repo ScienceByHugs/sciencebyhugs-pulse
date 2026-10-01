@@ -1,3 +1,4 @@
+import { marketingFields, readMarketing } from './marketing'
 import { avatarMarkup, bindAvatars } from './avatar'
 import { calculateReconstitution } from './reconstitution'
 import { bindPushPanel, pushEnabled, disablePush, pushPrompt } from './push'
@@ -109,6 +110,7 @@ function renderAuth(message='') {
           <label>Email<input id="email" type="email" required autocomplete="email"></label>
           <label>Password<input id="password" type="password" minlength="8" required autocomplete="current-password"></label>
           <button class="primary" type="submit">Sign in</button>
+          <div id="signup-preferences" hidden>${marketingFields('signup')}</div>
           <button class="ghost" id="signup" type="button">Create account</button>
           <button class="text-button" id="forgot-password" type="button">Forgot password?</button>
         </form>
@@ -123,11 +125,17 @@ function renderAuth(message='') {
     boot()
   })
   document.querySelector('#signup')!.addEventListener('click',async()=>{
+    const preferences=document.querySelector<HTMLElement>('#signup-preferences')!
+    if(preferences.hidden){preferences.hidden=false;document.querySelector('#signup')!.textContent='Create my account';return}
+    const form=document.querySelector<HTMLFormElement>('#auth-form')!
+    if(!form.reportValidity()) return
+    let consent
+    try { consent=readMarketing(form) } catch(error) { return renderAuth(error instanceof Error?error.message:'Check your preferences.') }
     const emailRedirectTo=new URL(import.meta.env.BASE_URL,window.location.origin).toString()
     const {error}=await supabase.auth.signUp({
       email:email(),
       password:pass(),
-      options:{emailRedirectTo}
+      options:{emailRedirectTo,data:{marketing_consent:{...consent,app:'pulse',source:'signup'}}}
     })
     renderAuth(error ? error.message : 'Account created. Check your email if confirmation is required, then sign in.')
   })

@@ -14,7 +14,7 @@ async function setup({signInError=null,updateError=null}={}){
     return nodes.get(selector)
   }
   const calls=[]
-  const context={exports:{},Error,URL,document:{querySelector:node},window:{location:{origin:'https://pulse.sciencebyhugs.com'}},avatarPanel:()=>'',pushPanel:()=>'<section class="push-panel"></section>',supabase:{auth:{
+  const context={exports:{},Error,URL,document:{querySelector:node},window:{location:{origin:'https://pulse.sciencebyhugs.com'}},marketingPanel:()=>'',bindMarketing:async()=>{},avatarPanel:()=>'',pushPanel:()=>'<section class="push-panel"></section>',supabase:{auth:{
     async getSession(){return {data:{session:{user:{user_metadata:{display_name:'Anthony'}}}}}},
     async updateUser(value){calls.push(['update',value]);return {error:updateError}},
     async signInWithPassword(value){calls.push(['signIn',value]);return {error:signInError}},
