@@ -763,50 +763,151 @@ dialog input,dialog select,dialog textarea,dialog button{
 }
 
 
-/* Centered quick-log layout */
+/* Balanced quick-log layout */
+#log-modal{
+  width:min(560px,calc(100vw - 28px));
+  max-width:calc(100vw - 28px);
+  max-height:min(90vh,calc(100dvh - 28px));
+  padding:22px;
+  overflow-y:auto;
+  overflow-x:hidden;
+}
 #log-modal #log-form{
   width:100%;
+  max-width:500px;
   margin:0 auto;
+  display:grid;
+  gap:14px;
+}
+#log-modal #log-form > .panel-head{
+  display:grid;
+  grid-template-columns:78px minmax(0,1fr) 78px;
+  align-items:start;
+  gap:0;
+  padding:0;
+  text-align:center;
+}
+#log-modal #log-form > .panel-head > div{
+  grid-column:2;
+  width:100%;
+  min-width:0;
+}
+#log-modal #log-form > .panel-head .modal-close{
+  position:static;
+  grid-column:3;
+  justify-self:end;
+  align-self:start;
+  width:auto;
+  min-width:72px;
+}
+#log-modal #log-title,
+#log-modal #log-kicker{
+  text-align:center;
 }
 #log-modal #log-form > label,
 #log-modal #category-fields label{
+  width:100%;
+  margin:0;
   text-align:center;
+  gap:6px;
+}
+#log-modal #category-fields{
+  display:grid;
+  gap:14px;
+  width:100%;
+}
+#log-modal .split{
+  width:100%;
+  gap:14px;
+  align-items:start;
 }
 #log-modal #log-form input:not([type="hidden"]),
 #log-modal #log-form select,
 #log-modal #log-form textarea{
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  margin:0 auto;
   text-align:center;
   text-align-last:center;
 }
-#log-modal #log-form textarea::placeholder,
-#log-modal #log-form input::placeholder{
+#log-modal #log-form input::placeholder,
+#log-modal #log-form textarea::placeholder{
   text-align:center;
 }
 #log-modal #log-stock-note{
-  text-align:center;
-}
-#log-modal #log-form > .panel-head{
-  position:relative;
-  justify-content:center;
-  text-align:center;
-  padding-inline:72px;
-}
-#log-modal #log-form > .panel-head > div{
   width:100%;
-}
-#log-modal #log-form > .panel-head .modal-close{
-  position:absolute;
-  right:0;
-  top:0;
-}
-#log-modal .split{
-  align-items:start;
+  margin:0;
+  padding:12px 14px;
+  text-align:center;
+  line-height:1.4;
 }
 #log-modal .log-form-actions{
+  width:100%;
   justify-content:center;
+  margin:0;
 }
+#log-modal .log-form-actions > *{
+  width:100%;
+  max-width:100%;
+}
+
 @media(max-width:520px){
+  #log-modal{
+    width:calc(100vw - 24px);
+    max-width:calc(100vw - 24px);
+    max-height:calc(100dvh - 24px);
+    padding:16px;
+    border-radius:20px;
+  }
+  #log-modal #log-form{
+    gap:11px;
+    max-width:none;
+  }
   #log-modal #log-form > .panel-head{
-    padding-inline:62px;
+    grid-template-columns:70px minmax(0,1fr) 70px;
+    align-items:center;
+    min-height:52px;
+  }
+  #log-modal #log-form > .panel-head .modal-close{
+    min-width:64px;
+    min-height:42px;
+    padding:8px 10px;
+  }
+  #log-modal #log-title{
+    margin:.12rem 0 0;
+    font-size:1.12rem;
+    line-height:1.15;
+  }
+  #log-modal #log-kicker{
+    font-size:.58rem;
+    letter-spacing:.16em;
+  }
+  #log-modal #log-form > label,
+  #log-modal #category-fields label{
+    gap:5px;
+    font-size:.76rem;
+  }
+  #log-modal #category-fields,
+  #log-modal .split{
+    gap:11px;
+  }
+  #log-modal #log-form input:not([type="hidden"]),
+  #log-modal #log-form select{
+    min-height:44px;
+    padding:9px 11px;
+    border-radius:12px;
+  }
+  #log-modal #log-form textarea{
+    min-height:70px;
+    padding:10px 11px;
+    border-radius:12px;
+  }
+  #log-modal #log-stock-note{
+    padding:10px 12px;
+    font-size:.9rem;
+  }
+  #log-modal .log-form-actions button{
+    min-height:46px;
   }
 }
