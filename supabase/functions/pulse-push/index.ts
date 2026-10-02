@@ -121,6 +121,8 @@ async function dispatch() {
     const userSchedules = (schedules || []).filter((s:any) => s.user_id === pref.user_id && s.tracked_items?.active)
 
     if (pref.dose_reminders_enabled) {
+      const lead = Number(pref.reminder_lead_minutes || 0)
+      const dueSoon: { schedule:any; occurrenceDate:string; key:string }[] = []
       for (const s of userSchedules) {
         if (!s.scheduled_time) continue
         const [h,m] = s.scheduled_time.split(":").map(Number)
@@ -129,19 +131,30 @@ async function dispatch() {
           const occurrenceDate = addLocalDays(lp.date, offset)
           if (!dueOn(s, occurrenceDate)) continue
           const diff = offset*1440 + scheduledMinutes - nowMinutes
-          const lead = Number(pref.reminder_lead_minutes || 0)
           if (diff > lead || diff <= lead-5) continue
           const existing = userLogs.find((l:any) => logMatches(l,s.id,occurrenceDate,timezone))
           if (existing?.status === "completed" || existing?.status === "skipped") continue
           const key = `dose:${s.id}:${occurrenceDate}:lead:${lead}`
           if (await alreadySent(pref.user_id,key)) continue
-          const delivered = await sendToUser(pref.user_id,userSubs,"PULSE · Dose due soon",`${s.tracked_items?.name || "Scheduled dose"} is due soon.`,key)
-          if (delivered) { await markSent(pref.user_id,key); sent++ }
+          dueSoon.push({ schedule:s, occurrenceDate, key })
+        }
+      }
+      if (dueSoon.length) {
+        const names = dueSoon.map(x => x.schedule.tracked_items?.name || "Scheduled dose")
+        const body = names.length === 1
+          ? `${names[0]} is due soon.`
+          : `${names.length} items are due soon: ${names.join(", ")}.`
+        const groupTag = `dose-group:${lp.date}:lead:${lead}`
+        const delivered = await sendToUser(pref.user_id,userSubs,"PULSE · Dose due soon",body,groupTag)
+        if (delivered) {
+          for (const item of dueSoon) await markSent(pref.user_id,item.key)
+          sent++
         }
       }
     }
 
     if (pref.overdue_reminders_enabled) {
+      const overdue: { schedule:any; key:string }[] = []
       for (const s of userSchedules) {
         if (!s.scheduled_time || !dueOn(s,lp.date)) continue
         const [h,m] = s.scheduled_time.split(":").map(Number)
@@ -151,8 +164,19 @@ async function dispatch() {
         if (existing?.status === "completed" || existing?.status === "skipped") continue
         const key = `overdue:${s.id}:${lp.date}`
         if (await alreadySent(pref.user_id,key)) continue
-        const delivered = await sendToUser(pref.user_id,userSubs,"PULSE · Dose overdue",`${s.tracked_items?.name || "Scheduled dose"} is overdue.`,key)
-        if (delivered) { await markSent(pref.user_id,key); sent++ }
+        overdue.push({ schedule:s, key })
+      }
+      if (overdue.length) {
+        const names = overdue.map(x => x.schedule.tracked_items?.name || "Scheduled dose")
+        const body = names.length === 1
+          ? `${names[0]} is overdue.`
+          : `${names.length} scheduled items are overdue: ${names.join(", ")}.`
+        const groupTag = `overdue-group:${lp.date}`
+        const delivered = await sendToUser(pref.user_id,userSubs,"PULSE · Dose overdue",body,groupTag)
+        if (delivered) {
+          for (const item of overdue) await markSent(pref.user_id,item.key)
+          sent++
+        }
       }
     }
 

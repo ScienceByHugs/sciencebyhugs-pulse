@@ -3,6 +3,42 @@ import { supabase } from './supabase'
 const functionName = 'pulse-push'
 const appName = 'pulse'
 
+let timezoneUserId = ''
+let timezoneSyncBound = false
+
+function deviceTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || '' } catch { return '' }
+}
+
+async function syncDeviceTimezone(userId: string) {
+  const timezone = deviceTimeZone()
+  if (!userId || !timezone || typeof supabase.from !== 'function') return
+  const { error } = await supabase.from('profiles').update({ timezone }).eq('user_id', userId)
+  if (error) console.warn('Could not sync device timezone for notifications.', error.message)
+}
+
+function bindDeviceTimezoneSync(userId: string) {
+  timezoneUserId = userId
+  void syncDeviceTimezone(userId)
+  if (timezoneSyncBound) return
+
+  const canBindDocument = typeof document !== 'undefined' && typeof document.addEventListener === 'function'
+  const canBindWindow = typeof window !== 'undefined' && typeof window.addEventListener === 'function'
+  if (!canBindDocument && !canBindWindow) return
+
+  timezoneSyncBound = true
+  if (canBindDocument) {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && timezoneUserId) void syncDeviceTimezone(timezoneUserId)
+    })
+  }
+  if (canBindWindow) {
+    window.addEventListener('focus', () => {
+      if (timezoneUserId) void syncDeviceTimezone(timezoneUserId)
+    })
+  }
+}
+
 function supported() {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 }
@@ -124,6 +160,7 @@ export async function bindPushPanel(userId?: string) {
   if (prompt) prompt.hidden = true
   if (promptStatus) promptStatus.textContent = ''
   if (!userId) { button.disabled = true; return }
+  bindDeviceTimezoneSync(userId)
   const dismissalKey = `pulse-push-prompt-dismissed:${userId}`
   let dismissed = false
   try { dismissed = sessionStorage.getItem(dismissalKey) === 'true' } catch {}
